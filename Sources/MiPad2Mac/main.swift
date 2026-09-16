@@ -3,7 +3,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = "0.1.15"
+let appVersion = "0.1.16"
 
 final class PointerOutput {
     var didPost: () -> Void = {}
@@ -60,7 +60,7 @@ final class PointerOutput {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     let reader = HIDReader()
     let output = PointerOutput()
     var permissionPage: PermissionPage!
@@ -70,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var automaticControl = AutomaticControl()
     let updateChecker = UpdateChecker()
     let testRecord = TestRecord()
+    let settingsPage = SettingsPage()
+    let controlSummary = NativeLayout.text("准备启用笔控制")
     let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
     let autoUpdate = NSButton(checkboxWithTitle: "启动时检查更新（每天最多一次）", target: nil, action: nil)
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -137,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func buildWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 620), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.delegate = self
         window.title = "MiPad2Mac \(appVersion) · 实验版"
         window.minSize = NSSize(width: 640, height: 440)
         window.setFrameAutosaveName("MiPadMainWindow")
@@ -158,18 +161,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusLabel,
             NativeLayout.text("目标显示器（修改后暂停控制）", heading: true), screenPicker,
             NativeLayout.row([NSTextField(labelWithString: "方向"), rotationPicker, flipX, flipY]),
-            controlLabel,
+            controlSummary,
             enableButton,
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
             NativeLayout.text("两种控制方式", heading: true),
             NativeLayout.text("未开启 · macOS 原生处理\nMiPad2Mac 不接管笔，系统仍可能响应笔的移动。根据本机测试，光标可能留在原来的屏幕，点击与笔尖位置不一定对应；本页的目标屏幕、旋转和翻转设置不会生效。暂停控制不等于禁用触控笔。"),
             NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标、手指触控或绘画笔压输出。"),
-            NativeLayout.text("关闭窗口后控制继续；暂停或退出后恢复系统原生处理。视频显示不受控制开关影响。")
+            NativeLayout.text("关闭窗口后的行为可在“设置”中选择；默认留在菜单栏继续控制。暂停或退出后恢复系统原生处理，视频显示不受影响。")
         ])
         let testPage = NativeLayout.page([
             NativeLayout.text("触控笔测试", heading: true),
             NativeLayout.text("当前仅支持触控笔输入。先在控制页选择平板并启用控制，再打开平板测试页验证位置、轻点和拖动。"),
             NSButton(title: "在平板打开触控测试页", target: self, action: #selector(showTestWindow)),
+            NativeLayout.text("控制输出", heading: true), controlLabel,
             NativeLayout.text("笔输入状态", heading: true), countsLabel, packetLabel, sampleLabel,
             rateTestButton, rateTestLabel,
             NativeLayout.text("测试与调试记录", heading: true),
@@ -196,25 +200,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
             NativeLayout.text("当前仅支持触控笔输入。基于 macOS 27 开发，macOS 26 暂未测试。")
         ])
-        tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("测试", testPage), ("关于", aboutPage)])
+        tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("测试", testPage), ("设置", settingsPage.view), ("关于", aboutPage)])
         NativeLayout.install(tabs, in: window)
     }
 
     func buildMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "MiPad ○"
+        statusItem.button?.title = "HID"
         statusItem.button?.setAccessibilityLabel("MiPad2Mac 控制菜单")
         let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false
         menuState.isEnabled = false; menu.addItem(menuState)
         menuControl.target = self; menuControl.action = #selector(menuToggle); menu.addItem(menuControl)
         menu.addItem(menuScreens); menu.addItem(.separator())
-        for (title, action, key) in [("打开控制窗口", #selector(showWindow), ""), ("权限检查…", #selector(showPermissions), ""), ("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
+        for (title, action, key) in [("打开控制窗口", #selector(showWindow), ""), ("设置…", #selector(showSettings), ""), ("权限检查…", #selector(showPermissions), ""), ("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
         statusItem.menu = menu
         let main = NSMenu(); let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
-        for (title, action, key) in [("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("权限检查…", #selector(showPermissions), ","), ("退出 MiPad2Mac", #selector(quit), "q")] {
+        for (title, action, key) in [("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("设置…", #selector(showSettings), ","), ("权限检查…", #selector(showPermissions), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; appMenu.addItem(item)
         }
         appItem.submenu = appMenu; NSApp.mainMenu = main
@@ -240,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toggle()
         if !enabled && statusLabel.stringValue != "鼠标控制已暂停" { showWindow() }
     }
+    @objc func showSettings() { tabs.selectTabViewItem(at: 3); settingsPage.refresh(); showWindow() }
     @objc func showPermissions() { refreshPermissions(); tabs.selectTabViewItem(at: 1); showWindow() }
     func showPermissionDialog() {
         if permissionWindow == nil {
@@ -257,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
-    @objc func checkUpdates() { tabs.selectTabViewItem(at: 3); showWindow(); updateChecker.check(manual: true, window: window) }
+    @objc func checkUpdates() { tabs.selectTabViewItem(at: 4); showWindow(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
         UserDefaults.standard.set(autoUpdate.state == .on, forKey: "checkUpdatesAutomatically")
     }
@@ -308,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             accessibilityAllowed = AXIsProcessTrusted()
             postAllowed = CGPreflightPostEventAccess()
             inputAllowed = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+            settingsPage.refresh()
             permissionCheckedAt = ProcessInfo.processInfo.systemUptime
         }
         let controlName: String
@@ -335,6 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
         attemptAutoStart()
+        controlSummary.stringValue = enabled ? "笔控制已开启" : (automaticControl.pending ? "等待设备或权限，准备自动启用" : "笔控制已暂停 · 系统原生处理")
         if !enabled {
             enableButton.title = automaticControl.pending ? "取消自动启用" : "启用鼠标控制"
             if automaticControl.pending { controlLabel.stringValue = permissionsReady ? "等待平板屏幕和受支持的笔接口，准备自动启用。" : "请完成权限申请，授权后自动启用。" }
@@ -419,14 +426,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                  flipX: flipX.state == .on, flipY: flipY.state == .on)
         enabled = true
         enableButton.title = "暂停鼠标控制"
-        statusItem.button?.title = "MiPad ●"
+        statusItem.button?.title = "HID"
         statusLabel.stringValue = "控制已启用，已独占笔接口以避免系统重复处理；暂停即恢复。"
     }
     func disable() {
         output.release(); enabled = false
         reader.setExclusive(false)
         enableButton.title = "启用鼠标控制"
-        statusItem?.button?.title = "MiPad ○"
+        statusItem?.button?.title = "HID"
     }
     @objc func pause() { automaticControl.pause(); disable(); statusLabel.stringValue = "鼠标控制已暂停" }
     @objc func mappingChanged() { pause() }
@@ -439,7 +446,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         automaticControl.request()
         reader.start()
     }
-    @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    @objc func showWindow() {
+        NSApp.setActivationPolicy(.regular)
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === window else { return true }
+        switch CloseBehavior.current {
+        case .quit: NSApp.terminate(nil)
+        case .menuBar:
+            for w in NSApp.windows { w.orderOut(nil) }
+            NSApp.setActivationPolicy(.accessory)
+        case .dock:
+            window.orderOut(nil)
+            NSApp.setActivationPolicy(.regular)
+        }
+        return false
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow(); return true
+    }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationWillTerminate(_ notification: Notification) { disable(); reader.stop(); timer?.invalidate() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
