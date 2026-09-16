@@ -2,6 +2,7 @@ import AppKit
 
 /// Bounded, local-only test notes. Never captures keyboard input or the USB bus.
 final class TestRecord {
+    var enabled = false
     let view = NSScrollView()
     private let text = NSTextView()
     private var lines: [String] = []
@@ -20,6 +21,7 @@ final class TestRecord {
         view.documentView = text
     }
     func append(_ message: String) {
+        guard enabled else { return }
         lines.append("[\(clock.string(from: Date()))] \(message)")
         if lines.count > 200 { lines.removeFirst(lines.count - 200) }
         text.string = lines.joined(separator: "\n")
@@ -28,6 +30,7 @@ final class TestRecord {
     func clear() { lines.removeAll(); text.string = "" }
     func save(in window: NSWindow) {
         let panel = NSSavePanel(); panel.nameFieldStringValue = "MiPad2Mac-test.txt"
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         let content = "MiPad2Mac \(appVersion) · 测试记录\n" + lines.joined(separator: "\n") + "\n"
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }

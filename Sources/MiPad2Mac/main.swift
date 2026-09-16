@@ -80,6 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let menuScreens = NSMenuItem(title: "目标显示器", action: nil, keyEquivalent: "")
     let rateTestLabel = NSTextField(wrappingLabelWithString: "测试会记录 15 秒实际输入；请持续用笔画圈。无需启用鼠标控制。")
     let rateTestButton = NSButton(title: "测试输入速率（15 秒）", target: nil, action: nil)
+    var monitoring = UserDefaults.standard.bool(forKey: "testMonitoringEnabled")
+    let monitoringToggle = NSButton(checkboxWithTitle: "开启测试监控与日志", target: nil, action: nil)
+    let recordStateButton = NSButton(title: "记录当前状态", target: nil, action: nil)
     var rateTestActive = false
     var window: NSWindow!
     var statusItem: NSStatusItem!
@@ -125,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             if self.enabled { self.output.receive(sample) }
         }
         output.didPost = { [weak self] in self?.reader.measurement?.recordPost(at: ProcessInfo.processInfo.systemUptime) }
+        applyMonitoring()
         reader.start()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.refreshStats() }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
@@ -170,7 +174,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标、手指触控或绘画笔压输出。"),
             NativeLayout.text("关闭窗口后的行为可在“设置”中选择；默认留在菜单栏继续控制。暂停或退出后恢复系统原生处理，视频显示不受影响。")
         ])
+        monitoringToggle.target = self; monitoringToggle.action = #selector(monitoringChanged)
+        monitoringToggle.state = monitoring ? .on : .off
+        recordStateButton.target = self; recordStateButton.action = #selector(recordTestState)
         let testPage = NativeLayout.page([
+            monitoringToggle,
+            NativeLayout.text("关闭后停止测试状态刷新、报文快照、速率测量和新增日志；已有日志仍可导出。正常笔控制所需的 HID 读取会继续，不受此开关影响。"),
             NativeLayout.text("触控笔测试", heading: true),
             NativeLayout.text("当前仅支持触控笔输入。先在控制页选择平板并启用控制，再打开平板测试页验证位置、轻点和拖动。"),
             NSButton(title: "在平板打开触控测试页", target: self, action: #selector(showTestWindow)),
@@ -179,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             rateTestButton, rateTestLabel,
             NativeLayout.text("测试与调试记录", heading: true),
             NativeLayout.text("记录连接状态、速率测试结果及测试窗口收到的按下/抬起。最多保留 200 条，仅在内存保存；可手动记录当前状态、导出或清空。不是完整 USB 抓包，也不记录键盘输入。"),
-            NativeLayout.row([NSButton(title: "记录当前状态", target: self, action: #selector(recordTestState)), NSButton(title: "导出记录…", target: self, action: #selector(exportTestRecord)), NSButton(title: "清空记录", target: self, action: #selector(clearTestRecord))]),
+            NativeLayout.row([recordStateButton, NSButton(title: "导出记录…", target: self, action: #selector(exportTestRecord)), NSButton(title: "清空记录", target: self, action: #selector(clearTestRecord))]),
             testRecord.view
         ])
         permissionPage = PermissionPage(owner: self)
@@ -289,12 +298,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let previous, let index = displays.firstIndex(of: previous) { screenPicker.selectItem(at: index + 1) }
         else if candidates.count == 1 { screenPicker.selectItem(at: candidates[0]) }
     }
+    @objc func monitoringChanged() {
+        monitoring = monitoringToggle.state == .on
+        UserDefaults.standard.set(monitoring, forKey: "testMonitoringEnabled")
+        applyMonitoring(); refreshStats()
+    }
+    func applyMonitoring() {
+        testRecord.enabled = monitoring; reader.diagnosticsEnabled = monitoring
+        rateTestButton.isEnabled = monitoring && !rateTestActive
+        recordStateButton.isEnabled = monitoring
+        rateTime = ProcessInfo.processInfo.systemUptime; rateReports = reader.reports
+        rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
+        if monitoring { testRecord.append("测试监控已开启") }
+        else {
+            reader.measurement = nil; rateTestActive = false
+            controlLabel.stringValue = "测试监控已关闭"
+            countsLabel.stringValue = "输入状态未刷新"
+            packetLabel.stringValue = "报文快照已关闭"
+            sampleLabel.stringValue = "坐标显示已暂停"
+            rateTestLabel.stringValue = "开启测试监控后可运行 15 秒速率测试。"
+        }
+    }
     @objc func recordTestState() {
+        guard monitoring else { return }
         testRecord.append("控制：\(enabled ? "已开启" : "未开启") · \(screenPicker.titleOfSelectedItem ?? "未选择屏幕")\n\(permissionsLabel.stringValue)\n\(countsLabel.stringValue)\n\(sampleLabel.stringValue)\n\(packetLabel.stringValue)")
     }
     @objc func exportTestRecord() { testRecord.save(in: window) }
     @objc func clearTestRecord() { testRecord.clear() }
     @objc func startRateTest() {
+        guard monitoring else { return }
         guard reader.deviceCount > 0 else { rateTestLabel.stringValue = "未连接笔接口，请先连接平板。"; return }
         reader.measurement = InputRateMeasurement(start: ProcessInfo.processInfo.systemUptime)
         testRecord.append("开始 15 秒笔输入速率测试")
@@ -313,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         testRecord.append(rateTestLabel.stringValue)
     }
     func refreshStats() {
-        updateRateTest()
+        if monitoring { updateRateTest() }
         if ProcessInfo.processInfo.systemUptime - permissionCheckedAt >= 2 {
             accessibilityAllowed = AXIsProcessTrusted()
             postAllowed = CGPreflightPostEventAccess()
@@ -326,6 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         permissionsLabel.stringValue = "\(controlName)：\(accessibilityAllowed ? "已授权" : "未授权") · 鼠标事件发送：\(postAllowed ? "已允许" : "未允许") · 输入监控：\(inputAllowed ? "已授权" : "未授权")"
         permissionPage.update(control: accessibilityAllowed, input: inputAllowed, post: postAllowed)
         permissionDialogPage.update(control: accessibilityAllowed, input: inputAllowed, post: postAllowed)
+        if monitoring {
         countsLabel.stringValue = "已打开接口：\(reader.deviceCount) · 收到报文：\(reader.reports) · 解析成功：\(reader.decoded)"
         let now = ProcessInfo.processInfo.systemUptime
         let elapsed = max(0.001, now - rateTime)
@@ -344,12 +377,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             sampleLabel.stringValue = String(format: "X %.3f · Y %.3f · 接触 %@ · 范围内 %@ · 压感 %d",
                 sample.x, sample.y, sample.touching ? "是" : "否", sample.inRange ? "是" : "否", sample.pressure)
         }
+        }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
         attemptAutoStart()
         controlSummary.stringValue = enabled ? "笔控制已开启" : (automaticControl.pending ? "等待设备或权限，准备自动启用" : "笔控制已暂停 · 系统原生处理")
         if !enabled {
             enableButton.title = automaticControl.pending ? "取消自动启用" : "启用鼠标控制"
-            if automaticControl.pending { controlLabel.stringValue = permissionsReady ? "等待平板屏幕和受支持的笔接口，准备自动启用。" : "请完成权限申请，授权后自动启用。" }
+            if monitoring && automaticControl.pending { controlLabel.stringValue = permissionsReady ? "等待平板屏幕和受支持的笔接口，准备自动启用。" : "请完成权限申请，授权后自动启用。" }
         }
     }
     var permissionsReady: Bool { accessibilityAllowed && postAllowed && inputAllowed }

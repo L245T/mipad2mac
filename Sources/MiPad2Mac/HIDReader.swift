@@ -8,6 +8,7 @@ final class HIDReader {
     var status: (String) -> Void = { print($0) }
     var sample: (Sample) -> Void = { _ in }
     var disconnected: () -> Void = {}
+    var diagnosticsEnabled = false
     var measurement: InputRateMeasurement?
     var reports = 0
     var decoded = 0
@@ -88,8 +89,10 @@ final class HIDReader {
             }
             d.reader.reports += 1
             let data = Array(UnsafeBufferPointer(start: bytes, count: length))
-            d.reader.lastBytes = data
-            d.reader.lastReportID = reportID
+            if d.reader.diagnosticsEnabled {
+                d.reader.lastBytes = data
+                d.reader.lastReportID = reportID
+            }
             let decoded = d.supported ? XiaomiDigitizer.decode(data, reportID: reportID) : nil
             d.reader.measurement?.receive(at: ProcessInfo.processInfo.systemUptime, sample: decoded)
             guard let sample = decoded else { return }

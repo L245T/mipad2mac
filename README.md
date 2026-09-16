@@ -20,6 +20,8 @@
 
 基于 macOS 27 开发，macOS 26 暂未测试。
 
+测试监控默认关闭，可在测试页开启并记住选择；关闭时停止调试刷新、报文快照、速率测量和新增日志，正常笔控制继续。日志导出会让用户选择文件位置，默认打开下载文件夹。关闭方式和自动更新检查等偏好保存在 `~/Library/Preferences/org.mipad2mac.app.plist`，常规覆盖升级保留；登录自启动由系统管理。
+
 ## 构建和使用
 
 需要 macOS、Xcode Command Line Tools 和 Swift 6.0 或更新版本。当前在 Apple Silicon / macOS 27.0 (26A428) 验证；最低部署版本设为 macOS 13，不代表已测试所有系统与架构。
