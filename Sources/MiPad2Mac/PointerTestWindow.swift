@@ -4,6 +4,7 @@ let bridgeEventTag: Int64 = 0x4d4950414432
 
 /// Receives normal macOS events so a posted HID conversion is not mistaken for a delivered click.
 final class PointerTestView: NSView {
+    var record: (String) -> Void = { _ in }
     var bridgeDown = 0
     var bridgeUp = 0
     var bridgeClicks = 0
@@ -23,6 +24,7 @@ final class PointerTestView: NSView {
             systemDown += 1; downPoint = nil
             lastMessage = "收到系统/其他来源的鼠标按下（不是 MiPad2Mac 标记事件）"
         }
+        record(lastMessage)
         needsDisplay = true
     }
     override func mouseDragged(with event: NSEvent) {
@@ -39,6 +41,7 @@ final class PointerTestView: NSView {
                 lastMessage = "完整轻点已到达此窗口；系统 clickCount = \(event.clickCount)"
             } else { lastMessage = "收到桥接抬起（拖动或本窗口未收到对应按下）" }
             downPoint = nil
+            record("\(lastMessage) · 累计按下 \(bridgeDown) / 抬起 \(bridgeUp) / 轻点 \(bridgeClicks)")
         }
         needsDisplay = true
     }

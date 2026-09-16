@@ -27,7 +27,7 @@ enum NativeLayout {
             stack.topAnchor.constraint(equalTo: doc.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -24)
         ])
-        for view in views where view is NSTextField || view is NSPopUpButton {
+        for view in views where view is NSTextField || view is NSPopUpButton || view is NSScrollView {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return scroll

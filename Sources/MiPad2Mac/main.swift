@@ -3,7 +3,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = "0.1.14"
+let appVersion = "0.1.15"
 
 final class PointerOutput {
     var didPost: () -> Void = {}
@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var tabs: NSTabView!
     var automaticControl = AutomaticControl()
     let updateChecker = UpdateChecker()
+    let testRecord = TestRecord()
     let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
     let autoUpdate = NSButton(checkboxWithTitle: "启动时检查更新（每天最多一次）", target: nil, action: nil)
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -113,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         buildWindow()
         buildMenu()
         refreshScreens()
-        reader.status = { [weak self] text in self?.statusLabel.stringValue = text }
+        reader.status = { [weak self] text in self?.statusLabel.stringValue = text; self?.testRecord.append(text) }
         reader.disconnected = { [weak self] in self?.disable() }
         reader.sample = { [weak self] sample in
             guard let self else { return }
@@ -158,14 +159,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NativeLayout.text("目标显示器（修改后暂停控制）", heading: true), screenPicker,
             NativeLayout.row([NSTextField(labelWithString: "方向"), rotationPicker, flipX, flipY]),
             controlLabel,
-            NativeLayout.row([enableButton, NSButton(title: "在平板打开测试页", target: self, action: #selector(showTestWindow))]),
+            enableButton,
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
             NativeLayout.text("两种控制方式", heading: true),
             NativeLayout.text("未开启 · macOS 原生处理\nMiPad2Mac 不接管笔，系统仍可能响应笔的移动。根据本机测试，光标可能留在原来的屏幕，点击与笔尖位置不一定对应；本页的目标屏幕、旋转和翻转设置不会生效。暂停控制不等于禁用触控笔。"),
             NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标、手指触控或绘画笔压输出。"),
-            NativeLayout.text("关闭窗口后控制继续；暂停或退出后恢复系统原生处理。视频显示不受控制开关影响。"),
-            NativeLayout.text("笔输入状态", heading: true), countsLabel,
-            rateTestButton, rateTestLabel
+            NativeLayout.text("关闭窗口后控制继续；暂停或退出后恢复系统原生处理。视频显示不受控制开关影响。")
+        ])
+        let testPage = NativeLayout.page([
+            NativeLayout.text("触控笔测试", heading: true),
+            NativeLayout.text("当前仅支持触控笔输入。先在控制页选择平板并启用控制，再打开平板测试页验证位置、轻点和拖动。"),
+            NSButton(title: "在平板打开触控测试页", target: self, action: #selector(showTestWindow)),
+            NativeLayout.text("笔输入状态", heading: true), countsLabel, packetLabel, sampleLabel,
+            rateTestButton, rateTestLabel,
+            NativeLayout.text("测试与调试记录", heading: true),
+            NativeLayout.text("记录连接状态、速率测试结果及测试窗口收到的按下/抬起。最多保留 200 条，仅在内存保存；可手动记录当前状态、导出或清空。不是完整 USB 抓包，也不记录键盘输入。"),
+            NativeLayout.row([NSButton(title: "记录当前状态", target: self, action: #selector(recordTestState)), NSButton(title: "导出记录…", target: self, action: #selector(exportTestRecord)), NSButton(title: "清空记录", target: self, action: #selector(clearTestRecord))]),
+            testRecord.view
         ])
         permissionPage = PermissionPage(owner: self)
         permissionDialogPage = PermissionPage(owner: self)
@@ -178,15 +188,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
         let aboutPage = NativeLayout.page([logo,
             NativeLayout.text("MiPad2Mac \(appVersion)", heading: true),
-            NativeLayout.text("作者：力利欧 @L245T"),
+            NativeLayout.text("作者：力利欧 @L245T\nPowered by GPT6-Astra"),
             NativeLayout.text("小米平板 DP-in 笔输入适配 · 开源实验项目"),
             NSButton(title: "打开项目主页", target: self, action: #selector(openProject)),
             NativeLayout.text("版本更新", heading: true), updateLabel,
             NSButton(title: "检查更新…", target: self, action: #selector(checkUpdates)), autoUpdate,
             NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
-            NativeLayout.text("当前仅支持触控笔输入。")
+            NativeLayout.text("当前仅支持触控笔输入。基于 macOS 27 开发，macOS 26 暂未测试。")
         ])
-        tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("关于", aboutPage)])
+        tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("测试", testPage), ("关于", aboutPage)])
         NativeLayout.install(tabs, in: window)
     }
 
@@ -242,12 +252,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func refreshPermissions() { permissionCheckedAt = -Double.infinity; refreshStats() }
     @objc func showAbout() {
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "MiPad2Mac", .applicationVersion: appVersion, .credits: NSAttributedString(string: "作者：力利欧 @L245T\n小米平板 DP-in 笔输入适配\n当前仅支持触控笔输入")])
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "MiPad2Mac", .applicationVersion: appVersion, .credits: NSAttributedString(string: "作者：力利欧 @L245T\nPowered by GPT6-Astra\n基于 macOS 27 开发，macOS 26 暂未测试。\n小米平板 DP-in 笔输入适配\n当前仅支持触控笔输入")])
         NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
-    @objc func checkUpdates() { tabs.selectTabViewItem(at: 2); showWindow(); updateChecker.check(manual: true, window: window) }
+    @objc func checkUpdates() { tabs.selectTabViewItem(at: 3); showWindow(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
         UserDefaults.standard.set(autoUpdate.state == .on, forKey: "checkUpdatesAutomatically")
     }
@@ -269,9 +279,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let previous, let index = displays.firstIndex(of: previous) { screenPicker.selectItem(at: index + 1) }
         else if candidates.count == 1 { screenPicker.selectItem(at: candidates[0]) }
     }
+    @objc func recordTestState() {
+        testRecord.append("控制：\(enabled ? "已开启" : "未开启") · \(screenPicker.titleOfSelectedItem ?? "未选择屏幕")\n\(permissionsLabel.stringValue)\n\(countsLabel.stringValue)\n\(sampleLabel.stringValue)\n\(packetLabel.stringValue)")
+    }
+    @objc func exportTestRecord() { testRecord.save(in: window) }
+    @objc func clearTestRecord() { testRecord.clear() }
     @objc func startRateTest() {
         guard reader.deviceCount > 0 else { rateTestLabel.stringValue = "未连接笔接口，请先连接平板。"; return }
         reader.measurement = InputRateMeasurement(start: ProcessInfo.processInfo.systemUptime)
+        testRecord.append("开始 15 秒笔输入速率测试")
         rateTestActive = true; rateTestButton.isEnabled = false
         rateTestLabel.stringValue = "测试开始：请连续画圈 15 秒。启用控制时也会统计提交事件；暂停或离笔时间会计入平均值。"
     }
@@ -284,6 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         rateTestActive = false; rateTestButton.isEnabled = true
         rateTestLabel.stringValue = String(format: "15 秒结果：接收 %.1f 条/秒 · 有效坐标 %.1f 条/秒 · 提交 %.1f 次/秒\n坐标变化 %d 次 · 重置 %d 条 · 相邻回调最长间隔 %.1f 毫秒\n应用层统计，含停顿；提交不代表目标应用收到，无数据时不能判断硬件速率。", m.reportRate, m.positionRate, m.postRate, m.positionChanges, m.resetReports, m.maxGap * 1000)
+        testRecord.append(rateTestLabel.stringValue)
     }
     func refreshStats() {
         updateRateTest()
@@ -374,7 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         test.title = "MiPad2Mac · 轻点与坐标测试"
         test.isReleasedWhenClosed = false
         test.acceptsMouseMovedEvents = true
-        test.contentView = PointerTestView(frame: NSRect(origin: .zero, size: frame.size))
+        let canvas = PointerTestView(frame: NSRect(origin: .zero, size: frame.size))
+        canvas.record = { [weak self] message in self?.testRecord.append(message) }
+        test.contentView = canvas
+        testRecord.append("打开平板触控笔测试页；该窗口记录实际收到的事件。")
         testWindow = test
         test.makeKeyAndOrderFront(nil)
         test.makeFirstResponder(test.contentView)

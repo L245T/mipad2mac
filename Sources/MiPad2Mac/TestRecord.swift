@@ -1,0 +1,40 @@
+import AppKit
+
+/// Bounded, local-only test notes. Never captures keyboard input or the USB bus.
+final class TestRecord {
+    let view = NSScrollView()
+    private let text = NSTextView()
+    private var lines: [String] = []
+    private let clock: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
+    }()
+    init() {
+        view.hasVerticalScroller = true
+        view.borderType = .bezelBorder
+        view.heightAnchor.constraint(equalToConstant: 180).isActive = true
+        text.isEditable = false; text.isSelectable = true
+        text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        text.isVerticallyResizable = true; text.isHorizontallyResizable = false
+        text.autoresizingMask = [.width]
+        text.textContainer?.widthTracksTextView = true
+        view.documentView = text
+    }
+    func append(_ message: String) {
+        lines.append("[\(clock.string(from: Date()))] \(message)")
+        if lines.count > 200 { lines.removeFirst(lines.count - 200) }
+        text.string = lines.joined(separator: "\n")
+        text.scrollToEndOfDocument(nil)
+    }
+    func clear() { lines.removeAll(); text.string = "" }
+    func save(in window: NSWindow) {
+        let panel = NSSavePanel(); panel.nameFieldStringValue = "MiPad2Mac-test.txt"
+        let content = "MiPad2Mac \(appVersion) · 测试记录\n" + lines.joined(separator: "\n") + "\n"
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do { try content.write(to: url, atomically: true, encoding: .utf8) }
+            catch {
+                let alert = NSAlert(error: error); alert.beginSheetModal(for: window)
+            }
+        }
+    }
+}
