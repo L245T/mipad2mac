@@ -1,6 +1,6 @@
 # MiPad2Mac
 
-小米平板 DP-in 的 macOS 笔输入适配工具。
+面向小米平板 9 Pro Max DP-in 模式的 macOS HID 笔输入适配工具，让触控笔在 Mac 上实现准确定位、点击与拖动。
 
 ![MiPad2Mac 图标](assets/branding/mipad2mac-app-icon-v8.png)
 
