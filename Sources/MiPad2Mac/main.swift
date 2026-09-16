@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let updateChecker = UpdateChecker()
     let testRecord = TestRecord()
     let settingsPage = SettingsPage()
+    let sponsorSection = SponsorSection()
     let controlSummary = NativeLayout.text("准备启用笔控制")
     let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
     let autoUpdate = NSButton(checkboxWithTitle: "启动时检查更新（每天最多一次）", target: nil, action: nil)
@@ -198,7 +199,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NativeLayout.text("版本更新", heading: true), updateLabel,
             NSButton(title: "检查更新…", target: self, action: #selector(checkUpdates)), autoUpdate,
             NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
-            NativeLayout.text("当前仅支持触控笔输入。基于 macOS 27 开发，macOS 26 暂未测试。")
+            NativeLayout.text("当前仅支持触控笔输入。基于 macOS 27 开发，macOS 26 暂未测试。"),
+            NativeLayout.text("赞助", heading: true),
+            NativeLayout.text("如果 MiPad2Mac 对你有帮助，欢迎自愿赞助，支持项目持续维护。感谢支持！"),
+            sponsorSection.view,
+            NativeLayout.text("使用微信或支付宝扫描对应二维码。看不清时可点击“查看原图”放大。")
         ])
         tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("测试", testPage), ("设置", settingsPage.view), ("关于", aboutPage)])
         NativeLayout.install(tabs, in: window)

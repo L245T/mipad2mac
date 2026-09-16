@@ -11,6 +11,7 @@ FILES = [
     'assets/branding/mipad2mac-logo-v8.svg',
     'assets/branding/mipad2mac-app-icon-v8.svg',
     'assets/branding/mipad2mac-app-icon-v8.png',
+    'assets/sponsor/wechat.png', 'assets/sponsor/alipay.jpg',
     'scripts/build-app.sh', 'scripts/build-icon.sh', 'scripts/build-dmg.sh',
     'scripts/test.sh', 'scripts/export-source.py',
 ]

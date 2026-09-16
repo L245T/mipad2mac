@@ -10,6 +10,8 @@ trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/MiPad2Mac.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 bash scripts/build-icon.sh "$APP/Contents/Resources/MiPad2Mac.icns"
+mkdir -p "$APP/Contents/Resources/Sponsor"
+cp assets/sponsor/wechat.png assets/sponsor/alipay.jpg "$APP/Contents/Resources/Sponsor/"
 cp .build/release/MiPad2Mac "$APP/Contents/MacOS/MiPad2Mac"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

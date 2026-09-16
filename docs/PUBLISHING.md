@@ -21,3 +21,7 @@ python3 scripts/export-source.py /tmp/mipad2mac-public-source
 应用从固定仓库 `/releases/latest` 读取正式 Release，识别 `v主.次.补丁` 或 `主.次.补丁` 三段数字版本；忽略草稿和预发布。不支持带 beta 等后缀的版本号。
 
 仅有 Git 提交或标签不会产生更新提醒，必须创建正式 GitHub Release。发布前同步 `main.swift`、构建脚本、README 和 CHANGELOG 的版本，运行测试、检查 UI、构建并验证 DMG。上传源码不代表已发布安装包。
+
+## 构建与发布节奏
+
+日常修改和本地构建不提升版本号、不打版本标签、不上传 GitHub。只有用户明确要求创建新版本时，才确定版本号、构建并同步公开仓库。赞助原图保存在 `assets/sponsor/`，供 README 与应用共用。

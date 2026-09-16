@@ -69,4 +69,18 @@ DMG 中提供应用、Applications 入口及安装说明。退出旧版，将应
 
 MIT 许可证。本项目与 Xiaomi / Apple 无隶属关系。
 
+## 赞助
+
+如果 MiPad2Mac 对你有帮助，欢迎自愿赞助，支持项目持续维护。感谢支持！
+
+<table>
+  <tr><th align="center">微信</th><th align="center">支付宝</th></tr>
+  <tr>
+    <td align="center"><a href="assets/sponsor/wechat.png"><img src="assets/sponsor/wechat.png" alt="微信赞助收款二维码" width="260"></a></td>
+    <td align="center"><a href="assets/sponsor/alipay.jpg"><img src="assets/sponsor/alipay.jpg" alt="支付宝赞助收款二维码" width="260"></a></td>
+  </tr>
+</table>
+
+使用对应应用扫码，点击图片可查看原图。
+
 Powered by GPT-6 Astra
