@@ -46,43 +46,29 @@ enum NativeLayout {
     }
 }
 
-final class SetupWindow {
-    private var window: NSWindow?
-    private var tabs: NSTabView?
-    private let permissionText = NativeLayout.text("")
-    private let connectionText = NativeLayout.text("")
-    func update(permissions: String, connection: String) {
-        permissionText.stringValue = permissions; connectionText.stringValue = connection
+final class PermissionPage {
+    let controlStatus = NativeLayout.text("")
+    let inputStatus = NativeLayout.text("")
+    let controlButton: NSButton
+    let inputButton: NSButton
+    let view: NSView
+    init(owner: AppDelegate) {
+        controlButton = NSButton(title: "申请控制权限…", target: owner, action: #selector(AppDelegate.requestPermissions))
+        inputButton = NSButton(title: "申请输入监控权限…", target: owner, action: #selector(AppDelegate.requestInputPermission))
+        view = NativeLayout.page([
+            NativeLayout.text("权限检查", heading: true),
+            NativeLayout.text("当前仅支持触控笔输入。授权完成后会自动尝试启用笔的鼠标控制。"),
+            controlStatus, controlButton, inputStatus, inputButton,
+            NSButton(title: "重新检查", target: owner, action: #selector(AppDelegate.refreshPermissions)),
+            NativeLayout.text("控制权限在 macOS 27 中名为“设备控制和数据访问”，旧系统名为“辅助功能”。输入监控授权后可能需要重新启动应用。已授权的按钮会禁用。")
+        ])
     }
-    func show(owner: AppDelegate, permissions: Bool = false) {
-        if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 560), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            w.title = "MiPad2Mac · 使用指引与权限"; w.minSize = NSSize(width: 570, height: 410)
-            w.isReleasedWhenClosed = false; w.center()
-            let guide = NativeLayout.page([
-                NativeLayout.text("开始使用 MiPad2Mac", heading: true),
-                NativeLayout.text("1. 连接平板\n使用支持视频和数据的 USB-C 线，进入平板 DP-in。画面通过 DisplayPort 传输。"),
-                NativeLayout.text("2. 检查权限\n切换到“权限检查”，分别查看控制权限和输入监控。只有你点击设置按钮时才请求权限。"),
-                NativeLayout.text("3. 选择屏幕并启用\n回到主窗口，选择平板显示器，用笔轻点使程序收到数据，再点击“启用鼠标控制”。程序不会自动接管鼠标。"),
-                NativeLayout.text("4. 验证位置和轻点\n点击“在平板打开测试页”，检查笔尖与光标是否对应，轻点是否计数。需要时暂停控制后调整方向。"),
-                NativeLayout.text("当前支持笔的鼠标操作；手指输入仍待排查。关闭主窗口后程序继续运行，可从菜单栏暂停或退出。"),
-                NSButton(title: "进入控制窗口", target: owner, action: #selector(AppDelegate.finishGuide))
-            ])
-            let permissionPage = NativeLayout.page([
-                NativeLayout.text("权限检查", heading: true), permissionText,
-                NativeLayout.text("控制权限：用于移动光标和提交点击。macOS 27 中名为“设备控制和数据访问”，旧系统名为“辅助功能”。系统事件发送许可单独列出，以实际检测为准。"),
-                NSButton(title: "打开控制权限设置…", target: owner, action: #selector(AppDelegate.requestPermissions)),
-                NativeLayout.text("输入监控：用于读取平板 HID 输入，尤其是包含键鼠的诊断接口。授权后可能需要退出并重新打开应用。"),
-                NSButton(title: "打开输入监控设置…", target: owner, action: #selector(AppDelegate.requestInputPermission)),
-                NSButton(title: "重新检查", target: owner, action: #selector(AppDelegate.refreshPermissions)),
-                connectionText,
-                NativeLayout.text("权限允许不等于触控已正常；还需确认设备连接、收到报文和目标窗口实际响应。状态会自动刷新。")
-            ])
-            let t = NativeLayout.tabs([("使用指引", guide), ("权限检查", permissionPage)])
-            NativeLayout.install(t, in: w); tabs = t; window = w
-        }
-        tabs?.selectTabViewItem(at: permissions ? 1 : 0)
-        window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    func update(control: Bool, input: Bool, post: Bool) {
+        controlStatus.stringValue = "控制权限：\(control ? "已授权" : "未授权") · 鼠标事件发送：\(post ? "已允许" : "未允许")"
+        inputStatus.stringValue = "输入监控：\(input ? "已授权" : "未授权")"
+        controlButton.isEnabled = !(control && post)
+        inputButton.isEnabled = !input
+        controlButton.title = control && post ? "控制权限已授权" : "申请控制权限…"
+        inputButton.title = input ? "输入监控已授权" : "申请输入监控权限…"
     }
-    func close() { window?.close() }
 }

@@ -19,6 +19,7 @@ final class HIDReader {
         return "ID \(lastReportID) / \(lastBytes.count) bytes: " + lastBytes.prefix(16).map { String(format: "%02x", $0) }.joined(separator: " ")
     }
     var deviceCount: Int { devices.count }
+    var readyForControl: Bool { devices.count == 1 && devices[0].supported }
     var running = false
 
     final class DeviceContext {
