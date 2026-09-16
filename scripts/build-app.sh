@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
+SOURCE_REVISION="$(python3 scripts/source-revision.py)"
 swift build -c release --disable-sandbox --cache-path .build/cache
 mkdir -p "$PWD/dist"
 STAGING="$(mktemp -d "$PWD/dist/.app-build.XXXXXX")"
@@ -28,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+/usr/libexec/PlistBuddy -c "Add :MiPadSourceRevision string $SOURCE_REVISION" "$APP/Contents/Info.plist"
 # Replace the app only after the build and resource packaging succeed.
 DEST="$PWD/dist/MiPad2Mac.app"
 if [[ -d "$DEST" ]]; then

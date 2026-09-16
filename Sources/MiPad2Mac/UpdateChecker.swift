@@ -34,8 +34,12 @@ final class UpdateChecker {
                 else if let data, data.count <= 1_048_576,
                         let release = try? JSONDecoder().decode(PublishedRelease.self, from: data),
                         ReleaseVersion(release.tag_name) != nil, !release.draft, !release.prerelease {
+                    if ReleaseVersion(appVersion) == nil {
+                        message = "当前为代码摘要构建 \(appVersion)，无法与正式版 \(release.tag_name) 自动排序。可打开发布页面查看。"
+                    } else {
                     newer = release.isNewer(than: appVersion)
                     message = newer ? "发现新版本 \(release.tag_name)（当前 \(appVersion)）" : "当前 \(appVersion)，没有发现更新的正式版本。"
+                    }
                 } else { message = "版本信息格式不符合预期，未执行更新。" }
                 self.changed(message)
                 // Automatic checks only update visible status; they never interrupt pen control.

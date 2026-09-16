@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 # Build the app before packaging.
 bash scripts/build-app.sh
 APP="$PWD/dist/MiPad2Mac.app"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :MiPadSourceRevision' "$APP/Contents/Info.plist")"
 WORK="$(mktemp -d "$PWD/dist/.dmg.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/content"
@@ -25,5 +25,5 @@ hdiutil create -volname "MiPad2Mac $VERSION" -srcfolder "$WORK/content" -format 
 hdiutil verify "$WORK/package.dmg"
 DEST="$PWD/dist/MiPad2Mac-$VERSION.dmg"
 mv "$WORK/package.dmg" "$DEST"
-shasum -a 256 "$DEST" > "$DEST.sha256"
+(cd "$PWD/dist" && shasum -a 256 "MiPad2Mac-$VERSION.dmg") > "$DEST.sha256"
 printf '%s\n' "$DEST"

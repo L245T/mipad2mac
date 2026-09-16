@@ -13,7 +13,7 @@ FILES = [
     'assets/branding/mipad2mac-app-icon-v8.png',
     'assets/sponsor/wechat.png', 'assets/sponsor/alipay.jpg',
     'scripts/build-app.sh', 'scripts/build-icon.sh', 'scripts/build-dmg.sh',
-    'scripts/test.sh', 'scripts/export-source.py',
+    'scripts/test.sh', 'scripts/export-source.py', 'scripts/source-revision.py',
 ]
 for folder, suffix in [('Sources', '.swift'), ('Tests', '.swift'), ('Fixtures', '.hex')]:
     FILES.extend(str(p.relative_to(ROOT)) for p in sorted((ROOT / folder).rglob('*' + suffix)))

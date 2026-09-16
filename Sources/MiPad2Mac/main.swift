@@ -3,7 +3,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = "0.1.16"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "开发构建"
 
 final class PointerOutput {
     var didPost: () -> Void = {}
