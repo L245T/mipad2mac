@@ -3,7 +3,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = "0.1.13"
+let appVersion = "0.1.14"
 
 final class PointerOutput {
     var didPost: () -> Void = {}
@@ -160,7 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             controlLabel,
             NativeLayout.row([enableButton, NSButton(title: "在平板打开测试页", target: self, action: #selector(showTestWindow))]),
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
-            NativeLayout.text("关闭窗口后仍可通过菜单栏控制；退出应用会停止桥接。"),
+            NativeLayout.text("两种控制方式", heading: true),
+            NativeLayout.text("未开启 · macOS 原生处理\nMiPad2Mac 不接管笔，系统仍可能响应笔的移动。根据本机测试，光标可能留在原来的屏幕，点击与笔尖位置不一定对应；本页的目标屏幕、旋转和翻转设置不会生效。暂停控制不等于禁用触控笔。"),
+            NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标、手指触控或绘画笔压输出。"),
+            NativeLayout.text("关闭窗口后控制继续；暂停或退出后恢复系统原生处理。视频显示不受控制开关影响。"),
             NativeLayout.text("笔输入状态", heading: true), countsLabel,
             rateTestButton, rateTestLabel
         ])
