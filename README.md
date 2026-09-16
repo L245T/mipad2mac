@@ -1,6 +1,6 @@
 # MiPad2Mac
 
-小米平板 DP-in 的 macOS 笔输入适配工具。**v0.1.14 实验版**，作者：**力利欧 @L245T**。
+小米平板 DP-in 的 macOS 笔输入适配工具。
 
 ![MiPad2Mac 图标](assets/branding/mipad2mac-app-icon-v8.png)
 
@@ -64,3 +64,5 @@ DMG 中提供应用、Applications 入口及安装说明。退出旧版，将应
 `Sources/MiPadCore`：协议、坐标、状态和版本比较；`Sources/MiPad2Mac`：HID、AppKit 和事件输出；`Tests`：协议、状态、速率和版本比较测试。当前 19 项自动测试通过，硬件行为仍需实机验证。
 
 MIT 许可证。本项目与 Xiaomi / Apple 无隶属关系。
+
+Powered by GPT-6 Astra
