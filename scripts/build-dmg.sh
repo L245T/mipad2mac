@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 # Build the app before packaging.
 bash scripts/build-app.sh
 APP="$PWD/dist/MiPad2Mac.app"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :MiPadSourceRevision' "$APP/Contents/Info.plist")"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 WORK="$(mktemp -d "$PWD/dist/.dmg.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/content"

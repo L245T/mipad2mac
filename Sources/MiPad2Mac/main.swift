@@ -3,7 +3,8 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "开发构建"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
+let appSourceRevision = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "本地调试"
 
 final class PointerOutput {
     var didPost: () -> Void = {}
@@ -202,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
         let aboutPage = NativeLayout.page([logo,
             NativeLayout.text("MiPad2Mac \(appVersion)", heading: true),
+            NativeLayout.text("代码摘要：\(appSourceRevision)"),
             NativeLayout.text("作者：力利欧 @L245T\nPowered by GPT6-Astra"),
             NativeLayout.text("小米平板 DP-in 笔输入适配 · 开源实验项目"),
             NSButton(title: "打开项目主页", target: self, action: #selector(openProject)),
