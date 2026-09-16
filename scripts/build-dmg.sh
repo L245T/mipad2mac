@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# Build and sign the app first; never re-sign with a different identity while packaging.
+# Build the app before packaging.
 bash scripts/build-app.sh
 APP="$PWD/dist/MiPad2Mac.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
@@ -18,12 +18,9 @@ MiPad2Mac 安装说明
 3. 从应用程序文件夹启动，在“权限检查”页完成授权。
 4. 默认选择已识别的平板屏幕，权限齐全时自动启用鼠标控制。当前仅支持触控笔输入。
 
-本包使用本地开发证书签名，不是 Developer ID 公证发行版。
-其他 Mac 可能出现系统安全提示；DMG 打包本身不代表已获 Apple 公证。
 请不要直接在磁盘映像中运行应用。更换安装路径后若系统权限不生效，
 请在系统设置中核对授权的应用路径。
 TEXT
-codesign --verify --deep --strict "$WORK/content/MiPad2Mac.app"
 hdiutil create -volname "MiPad2Mac $VERSION" -srcfolder "$WORK/content" -format UDZO -ov "$WORK/package.dmg"
 hdiutil verify "$WORK/package.dmg"
 DEST="$PWD/dist/MiPad2Mac-$VERSION.dmg"

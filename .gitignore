@@ -4,7 +4,7 @@ dist/
 .DS_Store
 *.xcuserstate
 diagnostics/
-# Local diagnostics and signing material must never be published.
+# Local-only files must never be published.
 tmp/
 *.p12
 *.pfx

@@ -43,18 +43,6 @@ DMG 中提供应用、Applications 入口及安装说明。退出旧版，将应
 
 关闭窗口后控制继续，暂停或退出后恢复系统原生处理。视频显示不受控制开关影响。这里的“控制”是用户态输入适配，不是安装内核驱动。
 
-## 签名
-
-没有配置证书时使用 ad-hoc 签名，重建后可能需要重新授权。可以指定自己已有的代码签名身份：
-
-```sh
-MIPAD_SIGN_IDENTITY='你的代码签名证书名称或 SHA-1 指纹' bash scripts/build-dmg.sh
-```
-
-也支持 `MIPAD_SIGN_IDENTITY_FILE` 指定仅含身份指纹的文件；默认查找仓库外 `../本地签名证书/signing-identity.txt`。配置存在但为空、或签名失败时停止，不静默更换身份。私钥及密码不得放入源码库。
-
-固定证书、Bundle ID 和 designated requirement 有助于保持权限身份；二进制改变导致 CDHash 改变是正常现象。本地自签不等于 Developer ID 签名或 Apple 公证。其他 Mac 的首次安装与授权仍需独立验证。
-
 ## 设备与诊断边界
 
 已观察到 Xiaomi Pad 9 Pro Max `2717:2d05`：数位笔 HID、键盘/相对鼠标 HID，以及一个 class 6 USB 接口。已知笔为 Report ID 3、10 字节。仅精确匹配已知描述符；陌生固件不猜测字段后接管鼠标。详见 [协议记录](docs/DEVICE.md)。

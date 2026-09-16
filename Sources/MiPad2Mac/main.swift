@@ -184,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NativeLayout.text("版本更新", heading: true), updateLabel,
             NSButton(title: "检查更新…", target: self, action: #selector(checkUpdates)), autoUpdate,
             NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
-            NativeLayout.text("当前仅支持触控笔输入。本地开发证书签名不等于 Apple 公证。")
+            NativeLayout.text("当前仅支持触控笔输入。")
         ])
         tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("关于", aboutPage)])
         NativeLayout.install(tabs, in: window)

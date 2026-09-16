@@ -3,20 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
-# The optional identity file is outside the source repository; never source it as shell code.
-IDENTITY_FILE="${MIPAD_SIGN_IDENTITY_FILE:-$PWD/../本地签名证书/signing-identity.txt}"
-SIGN_IDENTITY="${MIPAD_SIGN_IDENTITY:-}"
-if [[ -z "$SIGN_IDENTITY" && -f "$IDENTITY_FILE" ]]; then
-    SIGN_IDENTITY="$(cat "$IDENTITY_FILE")"
-    if [[ -z "$SIGN_IDENTITY" ]]; then
-        printf '%s\n' "Signing identity file is empty; refusing to fall back to ad-hoc." >&2
-        exit 1
-    fi
-fi
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 swift build -c release --disable-sandbox --cache-path .build/cache
 mkdir -p "$PWD/dist"
-STAGING="$(mktemp -d "$PWD/dist/.signing.XXXXXX")"
+STAGING="$(mktemp -d "$PWD/dist/.app-build.XXXXXX")"
 trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/MiPad2Mac.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -37,9 +26,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign "$SIGN_IDENTITY" "$APP"
-codesign --verify --deep --strict "$APP"
-# A signing failure leaves the previously working app untouched.
+# Replace the app only after the build and resource packaging succeed.
 DEST="$PWD/dist/MiPad2Mac.app"
 if [[ -d "$DEST" ]]; then
     mkdir -p "$PWD/dist/archive"
@@ -51,8 +38,5 @@ touch "$DEST"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [[ -x "$LSREGISTER" ]]; then
     "$LSREGISTER" -f "$DEST" || printf '%s\n' "Warning: app registration refresh failed; reopen Finder to refresh its icon." >&2
-fi
-if [[ "$SIGN_IDENTITY" == "-" ]]; then
-    printf '%s\n' "Ad-hoc signature: updates change identity. Remove and re-add this app in macOS permissions after updating."
 fi
 printf '%s\n' "$DEST"
