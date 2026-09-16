@@ -1,0 +1,416 @@
+import AppKit
+import ApplicationServices
+import IOKit.hid
+import MiPadCore
+
+let appVersion = "0.1.12"
+
+final class PointerOutput {
+    var didPost: () -> Void = {}
+    var gesture = PointerGesture()
+    var lastPoint = CGPoint.zero
+    var mapping = Mapping(bounds: .zero)
+    var lastRelease = -Double.infinity
+    var lastClickPoint = CGPoint.zero
+    var clickCount: Int64 = 1
+    var downCount = 0
+    var upCount = 0
+    var moveCount = 0
+    var dragCount = 0
+    var lastWarpError: CGError = .success
+    let source = CGEventSource(stateID: .privateState)
+    func receive(_ sample: Sample) {
+        if let planned = gesture.consume(sample, mapping: mapping) {
+            let action = planned.action
+            let point = planned.point
+            if action == .down {
+                let nearby = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y) < 5
+                clickCount = nearby && ProcessInfo.processInfo.systemUptime - lastRelease < NSEvent.doubleClickInterval ? min(clickCount + 1, 3) : 1
+                lastClickPoint = point
+            }
+            send(action, at: point)
+        }
+    }
+    func release() {
+        if let planned = gesture.release() { send(planned.action, at: planned.point) }
+    }
+    private func send(_ action: PointerAction, at point: CGPoint) {
+        let type: CGEventType
+        switch action {
+        case .move: type = .mouseMoved
+        case .down: type = .leftMouseDown
+        case .drag: type = .leftMouseDragged
+        case .up: type = .leftMouseUp
+        }
+        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
+        // Position in the global desktop first, including when the cursor starts on another display.
+        // Warping does not itself generate a mouse event; the event below supplies that event.
+        lastWarpError = CGWarpMouseCursorPosition(point)
+        guard lastWarpError == .success || action == .up else { return }
+        event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
+        if action != .move { event.setIntegerValueField(.mouseEventClickState, value: clickCount) }
+        event.post(tap: .cghidEventTap)
+        didPost()
+        if action == .down { downCount += 1 }
+        if action == .up { upCount += 1 }
+        if action == .move { moveCount += 1 }
+        if action == .drag { dragCount += 1 }
+        lastPoint = point
+        if action == .up { lastRelease = ProcessInfo.processInfo.systemUptime }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    let reader = HIDReader()
+    let output = PointerOutput()
+    let mouseProbe = MouseProbe()
+    let hidMonitor = HIDMonitor()
+    let setupWindow = SetupWindow()
+    let updateChecker = UpdateChecker()
+    let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
+    let autoUpdate = NSButton(checkboxWithTitle: "启动时检查更新（每天最多一次）", target: nil, action: nil)
+    let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
+    let menuScreens = NSMenuItem(title: "目标显示器", action: nil, keyEquivalent: "")
+    let probeLabel = NSTextField(wrappingLabelWithString: "手指检测尚未运行。")
+    let rateTestLabel = NSTextField(wrappingLabelWithString: "测试会记录 15 秒实际输入；请持续用笔画圈。无需启用鼠标控制。")
+    let rateTestButton = NSButton(title: "测试输入速率（15 秒）", target: nil, action: nil)
+    var rateTestActive = false
+    var window: NSWindow!
+    var statusItem: NSStatusItem!
+    let statusLabel = NSTextField(wrappingLabelWithString: "尚未启动")
+    let countsLabel = NSTextField(wrappingLabelWithString: "")
+    let packetLabel = NSTextField(wrappingLabelWithString: "")
+    let sampleLabel = NSTextField(wrappingLabelWithString: "尚未收到坐标")
+    let permissionsLabel = NSTextField(wrappingLabelWithString: "")
+    let controlLabel = NSTextField(wrappingLabelWithString: "控制未启用：选择屏幕尚不生效；笔的移动来自系统原生处理。")
+    let screenPicker = NSPopUpButton()
+    let rotationPicker = NSPopUpButton()
+    let flipX = NSButton(checkboxWithTitle: "水平翻转", target: nil, action: nil)
+    let flipY = NSButton(checkboxWithTitle: "垂直翻转", target: nil, action: nil)
+    let enableButton = NSButton(title: "启用鼠标控制", target: nil, action: nil)
+    var displays: [CGDirectDisplayID] = []
+    var enabled = false
+    var latestSample: Sample?
+    var timer: Timer?
+    var sleepObserver: NSObjectProtocol?
+    var testWindow: NSWindow?
+    var rateTime = ProcessInfo.processInfo.systemUptime
+    var rateReports = 0
+    var rateOutput = 0
+    var permissionCheckedAt = -Double.infinity
+    var accessibilityAllowed = false
+    var postAllowed = false
+    var inputAllowed = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Load directly from this bundle so Dock does not depend on stale Launch Services icon metadata.
+        if let iconURL = Bundle.main.url(forResource: "MiPad2Mac", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
+        buildWindow()
+        buildMenu()
+        refreshScreens()
+        reader.status = { [weak self] text in self?.statusLabel.stringValue = text }
+        reader.disconnected = { [weak self] in self?.disable() }
+        reader.sample = { [weak self] sample in
+            guard let self else { return }
+            self.latestSample = sample
+            if self.enabled { self.output.receive(sample) }
+        }
+        output.didPost = { [weak self] in self?.reader.measurement?.recordPost(at: ProcessInfo.processInfo.systemUptime) }
+        reader.start()
+        mouseProbe.status = { [weak self] message in self?.probeLabel.stringValue = message }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.refreshStats() }
+        if let timer { RunLoop.main.add(timer, forMode: .common) }
+        NotificationCenter.default.addObserver(self, selector: #selector(displayChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.disable() }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        refreshStats()
+        updateChecker.changed = { [weak self] text in self?.updateLabel.stringValue = text }
+        updateChecker.check(manual: false, window: window)
+        if !UserDefaults.standard.bool(forKey: "hasSeenSetupV1") {
+            UserDefaults.standard.set(true, forKey: "hasSeenSetupV1")
+            showGuide()
+        }
+    }
+
+    func buildWindow() {
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 620), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.title = "MiPad2Mac \(appVersion) · 实验版"
+        window.minSize = NSSize(width: 640, height: 440)
+        window.setFrameAutosaveName("MiPadMainWindow")
+        window.center(); window.isReleasedWhenClosed = false
+        for label in [statusLabel, countsLabel, packetLabel, sampleLabel, permissionsLabel, controlLabel, probeLabel, rateTestLabel] { label.isSelectable = true }
+        packetLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        screenPicker.target = self; screenPicker.action = #selector(mappingChanged)
+        screenPicker.setAccessibilityLabel("目标显示器")
+        rotationPicker.addItems(withTitles: ["0°", "90°", "180°", "270°"])
+        rotationPicker.target = self; rotationPicker.action = #selector(mappingChanged)
+        rotationPicker.setAccessibilityLabel("旋转方向")
+        for control in [flipX, flipY] { control.target = self; control.action = #selector(mappingChanged) }
+        enableButton.target = self; enableButton.action = #selector(toggle)
+        enableButton.bezelStyle = .rounded
+        rateTestButton.target = self; rateTestButton.action = #selector(startRateTest)
+        let controlPage = NativeLayout.page([
+            NativeLayout.text("平板笔控制", heading: true),
+            NativeLayout.text("将平板上的笔操作映射到指定显示器。手指输入尚未解决。"),
+            statusLabel,
+            NativeLayout.text("目标显示器（修改后暂停控制）", heading: true), screenPicker,
+            NativeLayout.row([NSTextField(labelWithString: "方向"), rotationPicker, flipX, flipY]),
+            controlLabel,
+            NativeLayout.row([enableButton, NSButton(title: "在平板打开测试页", target: self, action: #selector(showTestWindow))]),
+            NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions)), NSButton(title: "使用指引…", target: self, action: #selector(showGuide))]),
+            NativeLayout.text("关闭窗口后仍可通过菜单栏控制；退出应用会停止桥接。")
+        ])
+        let diagnosticPage = NativeLayout.page([
+            NativeLayout.text("输入状态", heading: true), countsLabel, packetLabel, sampleLabel,
+            NativeLayout.text("实测速率", heading: true), rateTestButton, rateTestLabel,
+            NativeLayout.text("手指回传诊断", heading: true),
+            NativeLayout.row([NSButton(title: "USB / HID 分段监控…", target: self, action: #selector(showHIDMonitor)), NSButton(title: "检测鼠标通路（15 秒）", target: self, action: #selector(probeFinger))]), probeLabel,
+            NativeLayout.text("诊断只记录可读取的输入，不代表手指功能已修复。监控会暂停鼠标控制。")
+        ])
+        autoUpdate.target = self; autoUpdate.action = #selector(updatePreferenceChanged)
+        autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
+        let aboutPage = NativeLayout.page([
+            NativeLayout.text("MiPad2Mac \(appVersion)", heading: true),
+            NativeLayout.text("作者：力利欧 @L245T"),
+            NativeLayout.text("小米平板 DP-in 笔输入适配 · 开源实验项目"),
+            NSButton(title: "打开项目主页", target: self, action: #selector(openProject)),
+            NativeLayout.text("版本更新", heading: true), updateLabel,
+            NSButton(title: "检查更新…", target: self, action: #selector(checkUpdates)), autoUpdate,
+            NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
+            NativeLayout.text("手指输入尚未解决。本地开发证书签名不等于 Apple 公证。")
+        ])
+        NativeLayout.install(NativeLayout.tabs([("控制", controlPage), ("诊断", diagnosticPage), ("关于与更新", aboutPage)]), in: window)
+    }
+
+    func buildMenu() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.title = "MiPad ○"
+        statusItem.button?.setAccessibilityLabel("MiPad2Mac 控制菜单")
+        let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false
+        menuState.isEnabled = false; menu.addItem(menuState)
+        menuControl.target = self; menuControl.action = #selector(menuToggle); menu.addItem(menuControl)
+        menu.addItem(menuScreens); menu.addItem(.separator())
+        for (title, action, key) in [("打开控制窗口", #selector(showWindow), ""), ("使用指引…", #selector(showGuide), ""), ("权限检查…", #selector(showPermissions), ""), ("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
+        }
+        statusItem.menu = menu
+        let main = NSMenu(); let appItem = NSMenuItem(); main.addItem(appItem)
+        let appMenu = NSMenu()
+        for (title, action, key) in [("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("使用指引…", #selector(showGuide), ""), ("权限检查…", #selector(showPermissions), ","), ("退出 MiPad2Mac", #selector(quit), "q")] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; appMenu.addItem(item)
+        }
+        appItem.submenu = appMenu; NSApp.mainMenu = main
+    }
+    func menuWillOpen(_ menu: NSMenu) {
+        menuState.title = hidMonitor.running ? "分段监控中" : "笔接口：\(reader.deviceCount > 0 ? "已连接" : "未连接") · \(enabled ? "控制中" : "已暂停")"
+        menuControl.title = enabled ? "暂停鼠标控制" : "启用鼠标控制"
+        menuControl.isEnabled = !hidMonitor.running
+        let screens = NSMenu(); screens.autoenablesItems = false
+        for (index, _) in displays.enumerated() {
+            let item = NSMenuItem(title: screenPicker.itemTitle(at: index + 1), action: #selector(menuSelectScreen(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index + 1
+            item.state = screenPicker.indexOfSelectedItem == index + 1 ? .on : .off
+            item.isEnabled = !hidMonitor.running; screens.addItem(item)
+        }
+        menuScreens.submenu = screens; menuScreens.isEnabled = !displays.isEmpty && !hidMonitor.running
+    }
+    @objc func menuSelectScreen(_ sender: NSMenuItem) {
+        guard sender.tag > 0, sender.tag < screenPicker.numberOfItems, !hidMonitor.running else { return }
+        screenPicker.selectItem(at: sender.tag); mappingChanged()
+    }
+    @objc func menuToggle() {
+        toggle()
+        if !enabled && statusLabel.stringValue != "鼠标控制已暂停" { showWindow() }
+    }
+    @objc func showGuide() { refreshPermissions(); setupWindow.show(owner: self) }
+    @objc func showPermissions() { refreshPermissions(); setupWindow.show(owner: self, permissions: true) }
+    @objc func refreshPermissions() { permissionCheckedAt = -Double.infinity; refreshStats() }
+    @objc func finishGuide() { setupWindow.close(); showWindow() }
+    @objc func showAbout() {
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "MiPad2Mac", .applicationVersion: appVersion, .credits: NSAttributedString(string: "作者：力利欧 @L245T\n小米平板 DP-in 笔输入适配\n实验版 · 手指输入仍待验证")])
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
+    @objc func checkUpdates() { showWindow(); updateChecker.check(manual: true, window: window) }
+    @objc func updatePreferenceChanged() {
+        UserDefaults.standard.set(autoUpdate.state == .on, forKey: "checkUpdatesAutomatically")
+    }
+
+    func refreshScreens() {
+        displays.removeAll(); screenPicker.removeAllItems()
+        screenPicker.addItem(withTitle: "请选择平板显示器…")
+        for screen in NSScreen.screens {
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
+            let id = number.uint32Value
+            displays.append(id)
+            let bounds = CGDisplayBounds(id)
+            screenPicker.addItem(withTitle: "\(screen.localizedName) · 逻辑 \(Int(bounds.width))×\(Int(bounds.height)) · ID \(id)\(CGDisplayIsBuiltin(id) != 0 ? "（内置）" : "")")
+        }
+    }
+    @objc func startRateTest() {
+        guard reader.deviceCount > 0 else { rateTestLabel.stringValue = "未连接笔接口，请先连接平板。"; return }
+        reader.measurement = InputRateMeasurement(start: ProcessInfo.processInfo.systemUptime)
+        rateTestActive = true; rateTestButton.isEnabled = false
+        rateTestLabel.stringValue = "测试开始：请连续画圈 15 秒。启用控制时也会统计提交事件；暂停或离笔时间会计入平均值。"
+    }
+    func updateRateTest() {
+        guard rateTestActive, let m = reader.measurement else { return }
+        let remaining = m.start + m.duration - ProcessInfo.processInfo.systemUptime
+        if remaining > 0 {
+            rateTestLabel.stringValue = "剩余 \(Int(ceil(remaining))) 秒 · 已接收 \(m.reports) 条 · 已提交 \(m.posted) 次；请持续画圈。"
+            return
+        }
+        rateTestActive = false; rateTestButton.isEnabled = true
+        rateTestLabel.stringValue = String(format: "15 秒结果：接收 %.1f 条/秒 · 有效坐标 %.1f 条/秒 · 提交 %.1f 次/秒\n坐标变化 %d 次 · 重置 %d 条 · 相邻回调最长间隔 %.1f 毫秒\n应用层统计，含停顿；提交不代表目标应用收到，无数据时不能判断硬件速率。", m.reportRate, m.positionRate, m.postRate, m.positionChanges, m.resetReports, m.maxGap * 1000)
+    }
+    func refreshStats() {
+        updateRateTest()
+        if ProcessInfo.processInfo.systemUptime - permissionCheckedAt >= 2 {
+            accessibilityAllowed = AXIsProcessTrusted()
+            postAllowed = CGPreflightPostEventAccess()
+            inputAllowed = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+            permissionCheckedAt = ProcessInfo.processInfo.systemUptime
+        }
+        let controlName: String
+        if #available(macOS 27, *) { controlName = "设备控制和数据访问" } else { controlName = "辅助功能" }
+        permissionsLabel.stringValue = "\(controlName)：\(accessibilityAllowed ? "已授权" : "未授权") · 鼠标事件发送：\(postAllowed ? "已允许" : "未允许") · 输入监控：\(inputAllowed ? "已授权" : "未授权")"
+        setupWindow.update(permissions: permissionsLabel.stringValue, connection: "笔接口：\(reader.deviceCount) 个 · 可解析报文：\(reader.decoded) 条。")
+        countsLabel.stringValue = "已打开接口：\(reader.deviceCount) · 收到报文：\(reader.reports) · 解析成功：\(reader.decoded)"
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsed = max(0.001, now - rateTime)
+        let totalOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
+        countsLabel.stringValue += String(format: "\n实时速率（只读）：接收 %.0f 报文/秒 · 提交 %.0f 事件/秒 · 重置报文 %d", Double(reader.reports - rateReports) / elapsed, Double(totalOutput - rateOutput) / elapsed, reader.resetReports)
+        rateTime = now; rateReports = reader.reports; rateOutput = totalOutput
+        controlLabel.stringValue = enabled
+            ? "控制已启用 · 已提交按下/抬起：\(output.downCount)/\(output.upCount) · 移动/拖动：\(output.moveCount)/\(output.dragCount)\n定位调用：\(output.lastWarpError == .success ? "成功（待测试页验收）" : "失败")"
+            : "控制未启用：选择屏幕尚不生效；笔的移动来自系统原生处理。"
+        controlLabel.textColor = enabled ? .systemGreen : .systemOrange
+        if enabled, let cursor = CGEvent(source: nil)?.location {
+            controlLabel.stringValue += String(format: "\n目标点 %.0f, %.0f · 当前光标 %.0f, %.0f", output.lastPoint.x, output.lastPoint.y, cursor.x, cursor.y)
+        }
+        packetLabel.stringValue = reader.lastReport
+        if let sample = latestSample {
+            sampleLabel.stringValue = String(format: "X %.3f · Y %.3f · 接触 %@ · 范围内 %@ · 压感 %d",
+                sample.x, sample.y, sample.touching ? "是" : "否", sample.inRange ? "是" : "否", sample.pressure)
+        }
+        if enabled && !postAllowed { disable(); statusLabel.stringValue = "鼠标事件发送未获系统许可，控制已暂停。" }
+    }
+    @objc func requestPermissions() {
+        if !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
+        openPermissionSettings(anchor: "Privacy_Accessibility")
+        permissionCheckedAt = -Double.infinity
+        statusLabel.stringValue = "请在隐私与安全 → 设备控制和数据访问（旧系统为辅助功能）授权当前应用。更新后若开关已开但仍未授权，请移除旧条目再添加当前应用。"
+    }
+    @objc func requestInputPermission() {
+        if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
+            _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        }
+        openPermissionSettings(anchor: "Privacy_ListenEvent")
+        permissionCheckedAt = -Double.infinity
+        statusLabel.stringValue = "请在隐私与安全 → 输入监控中授权当前 MiPad2Mac；随后退出并重新打开。"
+    }
+    private func openPermissionSettings(anchor: String) {
+        // Request APIs need not display a dialog again after a previous decision.
+        // Always navigate on an explicit button click, including when already authorized.
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!
+        if !NSWorkspace.shared.open(url) {
+            let alert = NSAlert()
+            alert.messageText = "无法打开系统设置"
+            alert.informativeText = "请手动打开系统设置 → 隐私与安全，选择设备控制和数据访问或输入监控。"
+            alert.runModal()
+        }
+    }
+
+    @objc func showTestWindow() {
+        let index = screenPicker.indexOfSelectedItem - 1
+        guard displays.indices.contains(index), let screen = NSScreen.screens.first(where: {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displays[index]
+        }) else { statusLabel.stringValue = "请先选择平板显示器。"; return }
+        testWindow?.close()
+        let frame = screen.visibleFrame.insetBy(dx: 60, dy: 60)
+        let test = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        test.title = "MiPad2Mac · 轻点与坐标测试"
+        test.isReleasedWhenClosed = false
+        test.acceptsMouseMovedEvents = true
+        test.contentView = PointerTestView(frame: NSRect(origin: .zero, size: frame.size))
+        testWindow = test
+        test.makeKeyAndOrderFront(nil)
+        test.makeFirstResponder(test.contentView)
+        statusLabel.stringValue = "测试页已在目标屏幕打开。完整轻点计数增加才代表单击到达；橙色点应跟随笔尖。"
+    }
+    @objc func toggle() {
+        guard !hidMonitor.running else { statusLabel.stringValue = "请先停止分段监控。"; return }
+        if enabled { pause(); return }
+        mouseProbe.stop(cancelled: true)
+        guard CGPreflightPostEventAccess() else { requestPermissions(); return }
+        postAllowed = true; permissionCheckedAt = -Double.infinity
+        let index = screenPicker.indexOfSelectedItem - 1
+        guard displays.indices.contains(index), reader.deviceCount == 1, reader.decoded > 0 else {
+            statusLabel.stringValue = "请先选择屏幕，并确认至少收到一条可解析报文。"
+            return
+        }
+        let id = displays[index]
+        guard CGDisplayIsActive(id) != 0 else { displayChanged(); return }
+        guard reader.setExclusive(true) else { return }
+        output.mapping = Mapping(bounds: CGDisplayBounds(id), rotation: rotationPicker.indexOfSelectedItem * 90,
+                                 flipX: flipX.state == .on, flipY: flipY.state == .on)
+        enabled = true
+        enableButton.title = "暂停鼠标控制"
+        statusItem.button?.title = "MiPad ●"
+        statusLabel.stringValue = "控制已启用，已独占笔接口以避免系统重复处理；暂停即恢复。"
+    }
+    func disable() {
+        output.release(); enabled = false
+        reader.setExclusive(false)
+        enableButton.title = "启用鼠标控制"
+        statusItem?.button?.title = "MiPad ○"
+    }
+    @objc func pause() { disable(); statusLabel.stringValue = "鼠标控制已暂停" }
+    @objc func showHIDMonitor() {
+        hidMonitor.onStart = { [weak self] in
+            guard let self else { return }; self.pause(); self.mouseProbe.stop(cancelled: true); self.reader.stop()
+        }
+        hidMonitor.onFinish = { [weak self] in self?.reader.start() }
+        hidMonitor.show()
+    }
+    @objc func probeFinger() { guard !hidMonitor.running else { return }; pause(); mouseProbe.start() }
+    @objc func mappingChanged() { pause() }
+    @objc func displayChanged() { pause(); refreshScreens() }
+    @objc func reconnect() {
+        guard !hidMonitor.running else { return }
+        disable(); reader.stop(); reader.resetDiagnostics()
+        rateTime = ProcessInfo.processInfo.systemUptime; rateReports = 0
+        rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
+        latestSample = nil; sampleLabel.stringValue = "尚未收到坐标"
+        reader.start()
+    }
+    @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    @objc func quit() { NSApp.terminate(nil) }
+    func applicationWillTerminate(_ notification: Notification) { hidMonitor.onFinish = {}; hidMonitor.stop(); disable(); reader.stop(); mouseProbe.stop(); timer?.invalidate() }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
+
+if CommandLine.arguments.contains("--probe") {
+    // Read-only probe: never requests Accessibility and never posts mouse events.
+    print("MiPad2Mac \(appVersion) read-only probe")
+    print("Input monitoring status: \(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent).rawValue)")
+    for screen in NSScreen.screens { print("Display: \(screen.localizedName), \(screen.frame)") }
+    let reader = HIDReader()
+    reader.start()
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 15))
+    print("Devices: \(reader.deviceCount); reports: \(reader.reports); decoded: \(reader.decoded)")
+    print(reader.lastReport)
+    reader.stop()
+} else {
+    let app = NSApplication.shared
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.setActivationPolicy(.regular)
+    app.run()
+}

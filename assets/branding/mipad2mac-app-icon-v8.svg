@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">MiPad2Mac — 平板触控连接</title>
+  <desc id="desc">橙色平板、触控笔和带刘海的笔记本，通过弧形线缆连接。笔记本屏幕显示输入画布和橙色笔迹，不含品牌标志。</desc>
+  <defs><style>
+    .outline { fill:#fff; stroke:#222326; stroke-width:22; stroke-linecap:round; stroke-linejoin:round; }
+    .line { fill:none; stroke:#222326; stroke-width:22; stroke-linecap:round; stroke-linejoin:round; }
+  </style></defs>
+  <!-- Legacy ICNS mask only. Use the unmasked logo for Icon Composer. -->
+  <rect id="background" x="80" y="80" width="864" height="864" rx="194" fill="#fff"/>
+  <g id="foreground">
+    <path id="cable" class="line" d="M318 552V698C318 781 344 810 389 810C433 810 460 775 460 716"/>
+    <g id="notched-notebook">
+      <rect id="display-frame" class="outline" x="423" y="346" width="435" height="333" rx="21"/>
+      <rect id="display-screen" x="445" y="368" width="391" height="289" rx="4" fill="#eef1f4"/>
+      <path id="notch" fill="#222326" d="M598 355H683V379Q683 390 672 390H609Q598 390 598 379Z"/>
+      <g id="input-canvas">
+        <rect x="522" y="425" width="266" height="189" rx="13" fill="#fff"/>
+        <path d="M547 449H600" fill="none" stroke="#bac2cb" stroke-width="12" stroke-linecap="round"/>
+        <path id="received-stroke" d="M565 565L619 511L615 555L682 485" fill="none" stroke="#ff6900" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="752" cy="449" r="7" fill="#ff6900"/>
+      </g>
+      <path id="keyboard-base" class="outline" d="M423 679H858L886 714Q890 721 878 726H402Q390 721 395 714Z"/>
+      <path id="opening-recess" d="M601 680H681L675 695H607Z" fill="#222326"/>
+    </g>
+    <g id="tablet">
+      <rect id="tablet-frame" class="outline" x="217" y="204" width="270" height="361" rx="27"/>
+      <rect id="tablet-screen" x="239" y="226" width="226" height="317" rx="9" fill="#ff6900"/>
+      <path id="input-stroke" d="M277 427L330 374L326 418L388 349" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="stylus">
+      <path id="pen-body" class="outline" d="M154 482V262C154 240 188 240 188 262V482L171 523Z"/>
+      <path id="pen-tip" fill="#222326" d="M154 475H188L171 523Z"/>
+    </g>
+  </g>
+</svg>

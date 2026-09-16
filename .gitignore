@@ -1,0 +1,18 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.xcuserstate
+diagnostics/
+# Local diagnostics and signing material must never be published.
+tmp/
+*.p12
+*.pfx
+*.key
+*.key.pem
+*.mobileprovision
+.env
+.env.*
+本地签名证书/
+signing-identity.txt
+导入密码.txt
