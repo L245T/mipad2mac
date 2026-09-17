@@ -47,7 +47,7 @@ final class SystemSettingsController: NSSplitViewController {
     }
     func install(in window: NSWindow) {
         window.contentViewController = self
-        window.titleVisibility = .visible
+        window.titleVisibility = .hidden
         window.toolbarStyle = .unified
         let toolbar = NSToolbar(identifier: "MiPadSettingsToolbar")
         toolbar.showsBaselineSeparator = true
@@ -61,6 +61,7 @@ final class SystemSettingsController: NSSplitViewController {
         model.selection = index
         (splitViewItems.first?.viewController as? SettingsNavigation)?.select(index)
         model.app.window.title = Self.names[index]
+        (splitViewItems.last?.viewController as? SettingsContentController)?.heading.stringValue = Self.names[index]
     }
     @objc private func updateMaterial() {
         guard let sidebar = splitViewItems.first?.viewController.view else { return }
@@ -117,6 +118,10 @@ struct SettingsDetail: View {
                     Text(app.controlSummary.stringValue).foregroundStyle(Color(nsColor: app.controlSummary.textColor ?? .secondaryLabelColor))
                     ExplanationButton(text: app.controlStatusHelp, label: "处理方式说明")
                 }
+                if !app.enabled && app.automaticControl.requested {
+                    Text(app.statusLabel.stringValue).font(.callout).foregroundStyle(.secondary)
+                }
+                HStack { Spacer(); Button("权限检查…") { app.showPermissions() }; Button("重新连接") { model.act { app.reconnect() } } }
             } footer: {
                 Text("当前仅支持触控笔输入。")
             }
@@ -135,10 +140,6 @@ struct SettingsDetail: View {
                     Text("压力与倾斜"); Text("向支持的绘画软件发送笔压与倾斜数据。")
                 }.accessibilityLabel("压力与倾斜")
                 LabeledContent("虚拟按键") { Text("暂不支持").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
-            }
-            SettingsSection {
-                LabeledContent("连接状态", value: app.statusLabel.stringValue)
-                HStack { Spacer(); Button("权限检查…") { app.showPermissions() }; Button("重新连接") { model.act { app.reconnect() } } }
             }
         }
     }

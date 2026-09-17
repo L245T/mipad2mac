@@ -4,6 +4,7 @@ import SwiftUI
 /// Keep scrolling content entirely below the system title/toolbar, even at its top edge.
 final class SettingsContentController: NSViewController {
     let host: NSHostingController<SettingsDetail>
+    let heading = NSTextField(labelWithString: "控制")
     init(model: SettingsPresentation) { host = NSHostingController(rootView: SettingsDetail(model: model)); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
     override func loadView() {
@@ -14,6 +15,16 @@ final class SettingsContentController: NSViewController {
     func install(in window: NSWindow) {
         guard let guide = window.contentLayoutGuide as? NSLayoutGuide else { return }
         host.view.topAnchor.constraint(equalTo: guide.topAnchor).isActive = true
+        let header = NSView(); header.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(header)
+        heading.font = .systemFont(ofSize: 17, weight: .bold)
+        heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.topAnchor), header.bottomAnchor.constraint(equalTo: guide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            heading.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 30),
+            heading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            heading.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -20)
+        ])
     }
 }
 
