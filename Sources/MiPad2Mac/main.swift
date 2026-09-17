@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var permissionWindow: NSWindow?
     var tabs: SystemSettingsController!
     var automaticControl = AutomaticControl()
+    var connection = TabletConnection()
+    let controlNotification = ControlNotification()
+    var automaticNotificationPending = false
+    var tabletDisplayIDs: [UInt32] = []
     let updateChecker = UpdateChecker()
     let testRecord = TestRecord()
     let settingsPage = SettingsPage()
@@ -78,7 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         buildMenu()
         refreshScreens()
         reader.status = { [weak self] text in self?.statusLabel.stringValue = text; self?.testRecord.append(text) }
-        reader.disconnected = { [weak self] in self?.finishPenCapture(reason: "设备断开"); self?.disable() }
+        reader.disconnected = { [weak self] in self?.finishPenCapture(reason: "设备断开"); self?.connection.disconnected(); self?.automaticNotificationPending = false; self?.disable() }
+        reader.devicesChanged = { [weak self] in self?.connectionChanged() }
         reader.sample = { [weak self] sample in
             guard let self else { return }
             self.latestSample = sample
@@ -210,17 +215,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let previous = displays.indices.contains(oldIndex) ? displays[oldIndex] : nil
         displays.removeAll(); screenPicker.removeAllItems()
         var candidates: [Int] = []
+        tabletDisplayIDs = []
         screenPicker.addItem(withTitle: "请选择平板显示器…")
         for screen in NSScreen.screens {
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
             let id = number.uint32Value
             displays.append(id)
-            if CGDisplayIsBuiltin(id) == 0 && screen.localizedName.uppercased().contains("MI DISPLAY") { candidates.append(displays.count) }
+            if CGDisplayIsBuiltin(id) == 0 && screen.localizedName.uppercased().contains("MI DISPLAY") { candidates.append(displays.count); tabletDisplayIDs.append(id) }
             let bounds = CGDisplayBounds(id)
             screenPicker.addItem(withTitle: "\(screen.localizedName) · 逻辑 \(Int(bounds.width))×\(Int(bounds.height)) · ID \(id)\(CGDisplayIsBuiltin(id) != 0 ? "（内置）" : "")")
         }
         if let previous, let index = displays.firstIndex(of: previous) { screenPicker.selectItem(at: index + 1) }
-        else if candidates.count == 1 { screenPicker.selectItem(at: candidates[0]) }
+        else if reader.readyForControl && candidates.count == 1 { screenPicker.selectItem(at: candidates[0]) }
     }
     @objc func monitoringChanged() {
         monitoring = monitoringToggle.state == .on
@@ -303,7 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             else { captureLabel.stringValue = "剩余 \(Int(ceil(remaining))) 秒 · \(capture.summary)" }
         }
         if monitoring { updateRateTest() }
-        if ProcessInfo.processInfo.systemUptime - permissionCheckedAt >= 2 {
+        let permissionsRefreshed = ProcessInfo.processInfo.systemUptime - permissionCheckedAt >= 2
+        if permissionsRefreshed {
             accessibilityAllowed = AXIsProcessTrusted()
             postAllowed = CGPreflightPostEventAccess()
             inputAllowed = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
@@ -337,7 +344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
-        attemptAutoStart()
+        if permissionsRefreshed { attemptAutoStart() }
         controlMode.selectedSegment = enabled ? 1 : (automaticControl.pending ? -1 : 0)
         controlSummary.textColor = enabled ? .systemGreen : (automaticControl.pending ? .systemOrange : .secondaryLabelColor)
         statusLabel.textColor = reader.readyForControl ? .secondaryLabelColor : .systemOrange
@@ -433,16 +440,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         enableButton.title = "暂停鼠标控制"
         statusItem.button?.title = "HID"
         statusLabel.stringValue = "控制已启用，已独占笔接口以避免系统重复处理；暂停即恢复。"
+        if automaticNotificationPending {
+            automaticNotificationPending = false
+            statusLabel.stringValue = "平板触控笔已由 MiPad2Mac 控制，已自动选择平板屏幕。"
+            controlNotification.show { [weak self] in self?.enabled == true }
+        }
     }
     func disable() {
+        controlNotification.cancel()
         output.release(); enabled = false
         reader.setExclusive(false)
         enableButton.title = "启用鼠标控制"
         statusItem?.button?.title = "HID"
     }
-    @objc func pause() { automaticControl.pause(); disable(); statusLabel.stringValue = "鼠标控制已暂停" }
+    @objc func pause() { automaticNotificationPending = false; automaticControl.pause(); disable(); statusLabel.stringValue = "鼠标控制已暂停" }
     @objc func mappingChanged() { pause() }
-    @objc func displayChanged() { disable(); refreshScreens() }
+    func connectionChanged() {
+        refreshScreens()
+        if let target = connection.observe(penReady: reader.readyForControl, displayIDs: tabletDisplayIDs),
+           let index = displays.firstIndex(of: target) {
+            disable()
+            screenPicker.selectItem(at: index + 1)
+            automaticControl.request()
+            automaticNotificationPending = true
+        }
+        attemptAutoStart()
+        tabs?.model.sync()
+    }
+    @objc func displayChanged() { disable(); connectionChanged() }
     @objc func reconnect() {
         finishPenCapture(reason: "重新连接"); disable(); reader.stop(); reader.resetDiagnostics()
         rateTime = ProcessInfo.processInfo.systemUptime; rateReports = 0

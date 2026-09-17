@@ -8,6 +8,7 @@ final class HIDReader {
     var status: (String) -> Void = { print($0) }
     var sample: (Sample) -> Void = { _ in }
     var disconnected: () -> Void = {}
+    var devicesChanged: () -> Void = {}
     var diagnosticsEnabled = false
     var measurement: InputRateMeasurement?
     var penCapture: PenCapture?
@@ -77,6 +78,7 @@ final class HIDReader {
         registerReports(deviceContext)
         IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         status(supported ? "已连接 Xiaomi 数位笔接口；描述符匹配" : "未知描述符：仅诊断，禁止输出鼠标事件")
+        devicesChanged()
     }
 
     private func registerReports(_ deviceContext: DeviceContext) {
@@ -132,6 +134,7 @@ final class HIDReader {
         devices.remove(at: index)
         disconnected()
         status("平板已断开，已释放鼠标")
+        devicesChanged()
     }
 
     func stop() {
