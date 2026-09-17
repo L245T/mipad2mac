@@ -35,10 +35,10 @@ final class SystemSettingsController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         splitView.isVertical = true
-        let sidebarController = NSHostingController(rootView: SettingsSidebar(model: model))
+        let sidebarController = SettingsNavigation(model: model)
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
         sidebar.canCollapse = false; sidebar.minimumThickness = 220; sidebar.maximumThickness = 220
-        let detail = NSSplitViewItem(viewController: NSHostingController(rootView: SettingsDetail(model: model)))
+        let detail = NSSplitViewItem(viewController: SettingsContentController(model: model))
         detail.minimumThickness = 480
         addSplitViewItem(sidebar); addSplitViewItem(detail)
         NotificationCenter.default.addObserver(self, selector: #selector(updateMaterial), name: Notification.Name("MiPadSidebarAppearanceChanged"), object: nil)
@@ -50,13 +50,16 @@ final class SystemSettingsController: NSSplitViewController {
         window.titleVisibility = .visible
         window.toolbarStyle = .unified
         let toolbar = NSToolbar(identifier: "MiPadSettingsToolbar")
-        toolbar.showsBaselineSeparator = false
+        toolbar.showsBaselineSeparator = true
         window.toolbar = toolbar
+        (splitViewItems.last?.viewController as? SettingsContentController)?.install(in: window)
+        (splitViewItems.first?.viewController as? SettingsNavigation)?.install(in: window)
         selectTabViewItem(at: 0)
     }
     func selectTabViewItem(at index: Int) {
         guard Self.names.indices.contains(index) else { return }
         model.selection = index
+        (splitViewItems.first?.viewController as? SettingsNavigation)?.select(index)
         model.app.window.title = Self.names[index]
     }
     @objc private func updateMaterial() {
@@ -73,28 +76,13 @@ final class SystemSettingsController: NSSplitViewController {
     deinit { NotificationCenter.default.removeObserver(self); NSWorkspace.shared.notificationCenter.removeObserver(self) }
 }
 
-private struct SettingsSidebar: View {
-    @ObservedObject var model: SettingsPresentation
-    private let symbols = ["pencil", "checkmark.shield", "waveform.path", "gearshape", "info.circle"]
-    var body: some View {
-        List(selection: Binding<Int?>(get: { model.selection }, set: { if let value = $0 { model.app.tabs.selectTabViewItem(at: value) } })) {
-            ForEach(0..<5, id: \.self) { index in
-                Label(SystemSettingsController.names[index], systemImage: symbols[index])
-                    .symbolRenderingMode(.monochrome)
-                    .font(.body)
-                    .tag(index)
-                    .padding(.vertical, 3)
-            }
-        }.listStyle(.sidebar)
-    }
-}
-
 struct SettingsDetail: View {
     @ObservedObject var model: SettingsPresentation
     var permissionsOnly = false
     private var app: AppDelegate { model.app }
     var body: some View {
-        Form {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
             if permissionsOnly { permissions }
             else {
                 switch model.selection {
@@ -105,8 +93,10 @@ struct SettingsDetail: View {
                 default: about
                 }
             }
-        }.formStyle(.grouped).scrollContentBackground(.hidden)
+            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        }.scrollIndicators(.automatic)
             .background(Color(nsColor: .textBackgroundColor)).textSelection(.enabled)
+            .controlSize(.regular).toggleStyle(SettingsToggleStyle()).labeledContentStyle(SettingsValueStyle())
     }
     private func footerNote(_ text: String) -> some View {
         Text(text).font(.footnote).foregroundStyle(.secondary)
@@ -118,31 +108,31 @@ struct SettingsDetail: View {
     }
     private var control: some View {
         Group {
-            Section {
-                Picker("处理方式", selection: Binding(get: { app.enabled || app.automaticControl.pending ? 1 : 0 }, set: { value in model.act { app.controlMode.selectedSegment = value; app.controlModeChanged() } })) {
+            SettingsSection {
+                SettingsPicker("处理方式", selection: Binding(get: { app.enabled || app.automaticControl.pending ? 1 : 0 }, set: { value in model.act { app.controlMode.selectedSegment = value; app.controlModeChanged() } })) {
                     Text("macOS 原生处理").tag(0); Text("MiPad2Mac 控制").tag(1)
                 }
                 LabeledContent("状态") { status(app.controlSummary.stringValue, good: app.enabled) }
             } footer: {
                 HStack { Text("当前仅支持触控笔输入。"); Spacer(); help("原生处理由 macOS 响应，位置可能不对应平板。MiPad2Mac 控制将笔尖映射至指定屏幕，支持点击、拖动、压力与倾斜。两种方式都不影响 DP-in 视频。") }
             }
-            Section {
-                Picker("目标显示器", selection: Binding(get: { app.screenPicker.indexOfSelectedItem }, set: { value in model.act { app.screenPicker.selectItem(at: value); app.mappingChanged() } })) {
+            SettingsSection {
+                SettingsPicker("目标显示器", selection: Binding(get: { app.screenPicker.indexOfSelectedItem }, set: { value in model.act { app.screenPicker.selectItem(at: value); app.mappingChanged() } })) {
                     ForEach(Array(app.screenPicker.itemTitles.enumerated()), id: \.offset) { Text($0.element).tag($0.offset) }
                 }
-                Picker("旋转方向", selection: Binding(get: { app.rotationPicker.indexOfSelectedItem }, set: { value in model.act { app.rotationPicker.selectItem(at: value); app.mappingChanged() } })) {
+                SettingsPicker("旋转方向", selection: Binding(get: { app.rotationPicker.indexOfSelectedItem }, set: { value in model.act { app.rotationPicker.selectItem(at: value); app.mappingChanged() } })) {
                     ForEach(0..<4, id: \.self) { Text("\($0 * 90)°").tag($0) }
                 }
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
             } header: { Text("显示器") } footer: { footerNote("修改映射后会暂停控制，请重新启用。显示器尺寸为逻辑坐标。") }
-            Section("笔输入") {
+            SettingsSection("笔输入") {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); Text("向绘画软件传递数位笔数据。")
                 }.accessibilityLabel("压力与倾斜")
                 LabeledContent("虚拟按键") { Text("暂不支持").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
             }
-            Section {
+            SettingsSection {
                 LabeledContent("连接状态", value: app.statusLabel.stringValue)
                 HStack { Spacer(); Button("权限检查…") { app.showPermissions() }; Button("重新连接") { model.act { app.reconnect() } } }
             }
@@ -150,7 +140,7 @@ struct SettingsDetail: View {
     }
     private var permissions: some View {
         Group {
-            Section {
+            SettingsSection {
                 LabeledContent("控制与事件发送") {
                     status(app.accessibilityAllowed && app.postAllowed ? "已授权" : "未授权", good: app.accessibilityAllowed && app.postAllowed)
                     Button("申请权限…") { model.act { app.requestPermissions() } }.disabled(app.accessibilityAllowed && app.postAllowed)
@@ -160,18 +150,18 @@ struct SettingsDetail: View {
                     Button("申请权限…") { model.act { app.requestInputPermission() } }.disabled(app.inputAllowed)
                 }
             } header: { Text("所需权限") } footer: { footerNote("授权后自动尝试启用笔控制。输入监控授权后可能需要重启应用。") }
-            Section { HStack { Text("权限检查"); help("macOS 27 的控制权限名为“设备控制和数据访问”，旧系统称“辅助功能”。两种权限分别申请，已授权按钮不可重复申请。"); Spacer(); Button("重新检查") { model.act { app.refreshPermissions() } } } }
+            SettingsSection { HStack { Text("权限检查"); help("macOS 27 的控制权限名为“设备控制和数据访问”，旧系统称“辅助功能”。两种权限分别申请，已授权按钮不可重复申请。"); Spacer(); Button("重新检查") { model.act { app.refreshPermissions() } } } }
         }
     }
     private var testing: some View {
         Group {
-            Section {
+            SettingsSection {
                 Toggle(isOn: Binding(get: { app.monitoring }, set: { value in model.act { app.monitoringToggle.state = value ? .on : .off; app.monitoringChanged() } })) {
                     Text("测试监控与日志"); Text("关闭不影响正常笔控制，已有记录仍可导出。")
                 }.accessibilityLabel("测试监控与日志")
                 LabeledContent("定位、轻点与拖动") { Button("打开测试页") { app.showTestWindow() } }
             }
-            Section("输入与输出") {
+            SettingsSection("输入与输出") {
                 if app.monitoring {
                     Text(app.countsLabel.stringValue)
                     Text(app.controlLabel.stringValue)
@@ -181,14 +171,14 @@ struct SettingsDetail: View {
                 LabeledContent("输入速率") { Button("测试 15 秒") { model.act { app.startRateTest() } }.disabled(!app.monitoring || app.rateTestActive) }
                 if app.monitoring { Text(app.rateTestLabel.stringValue).font(.callout).foregroundStyle(.secondary) }
             }
-            Section {
-                Picker("采集操作", selection: Binding(get: { app.capturePicker.indexOfSelectedItem }, set: { app.capturePicker.selectItem(at: $0); model.generation += 1 })) {
+            SettingsSection {
+                SettingsPicker("采集操作", selection: Binding(get: { app.capturePicker.indexOfSelectedItem }, set: { app.capturePicker.selectItem(at: $0); model.generation += 1 })) {
                     ForEach(Array(app.capturePicker.itemTitles.enumerated()), id: \.offset) { Text($0.element).tag($0.offset) }
                 }
                 LabeledContent("笔报文诊断") { help("仅采集已打开的笔接口。每次最多 30 秒、12000 条、2 MiB；新采集替换旧原始数据，导出包含最近一次采集。请在操作前后静置对照。"); Button("采集 30 秒") { model.act { app.startPenCapture() } }.disabled(!app.monitoring || app.captureActive) }
                 Text(app.captureLabel.stringValue).font(.callout).foregroundStyle(.secondary)
             }
-            Section("测试记录") {
+            SettingsSection("测试记录") {
                 HStack { Button("记录状态") { model.act { app.recordTestState() } }.disabled(!app.monitoring); Spacer(); Button("导出…") { app.exportTestRecord() }; Button("清空") { model.act { app.clearTestRecord() } } }
                 Text(app.testRecord.displayText.isEmpty ? "暂无记录" : app.testRecord.displayText)
                     .font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
@@ -197,15 +187,15 @@ struct SettingsDetail: View {
     }
     private var settings: some View {
         Group {
-            Section {
+            SettingsSection {
                 Toggle(isOn: Binding(get: { app.settingsPage.materialToggle.state == .on }, set: { value in model.act { app.settingsPage.materialToggle.state = value ? .on : .off; app.settingsPage.materialChanged() } })) {
                     Text("透明侧栏"); Text("采用系统材质，遵循降低透明度设置。")
                 }.accessibilityLabel("透明侧栏")
-                Picker("关闭窗口时", selection: Binding(get: { app.settingsPage.closePicker.indexOfSelectedItem }, set: { value in model.act { app.settingsPage.closePicker.selectItem(at: value); app.settingsPage.closeChanged() } })) {
+                SettingsPicker("关闭窗口时", selection: Binding(get: { app.settingsPage.closePicker.indexOfSelectedItem }, set: { value in model.act { app.settingsPage.closePicker.selectItem(at: value); app.settingsPage.closeChanged() } })) {
                     Text("留在菜单栏").tag(0); Text("保留 Dock 图标").tag(1); Text("退出软件").tag(2)
                 }
             } header: { Text("外观与窗口") } footer: { footerNote("留在菜单栏时隐藏 Dock 图标，笔控制继续运行。") }
-            Section {
+            SettingsSection {
                 Toggle("登录 Mac 时自动启动", isOn: Binding(get: { app.settingsPage.loginToggle.state == .on }, set: { value in model.act { app.settingsPage.loginToggle.state = value ? .on : .off; app.settingsPage.loginChanged() } }))
                 if !app.settingsPage.loginStatus.isHidden { Text(app.settingsPage.loginStatus.stringValue).foregroundStyle(.orange) }
                 if !app.settingsPage.loginError.stringValue.isEmpty { Text(app.settingsPage.loginError.stringValue).foregroundStyle(.red) }
@@ -215,7 +205,7 @@ struct SettingsDetail: View {
     }
     private var about: some View {
         Group {
-            Section {
+            SettingsSection {
                 HStack(spacing: 20) {
                     Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 88, height: 88)
                     VStack(alignment: .leading, spacing: 5) {
@@ -226,15 +216,15 @@ struct SettingsDetail: View {
                 }.padding(.vertical, 8)
                 LabeledContent("开源项目") { Button("打开 GitHub") { app.openProject() } }
             } footer: { footerNote("小米平板 DP-in 笔输入适配工具。基于 macOS 27 开发，macOS 26 暂未测试。") }
-            Section {
-                Picker("更新渠道", selection: Binding(get: { app.updateChecker.channel }, set: { value in model.act { app.updateChecker.selectChannel(value) } })) {
+            SettingsSection {
+                SettingsPicker("更新渠道", selection: Binding(get: { app.updateChecker.channel }, set: { value in model.act { app.updateChecker.selectChannel(value) } })) {
                     ForEach(UpdateChannel.allCases, id: \.rawValue) { Text($0.title).tag($0) }
                 }
                 LabeledContent("软件更新") { Button("检查更新…") { app.checkUpdates() } }
                 Toggle("启动时检查更新", isOn: Binding(get: { app.autoUpdate.state == .on }, set: { value in model.act { app.autoUpdate.state = value ? .on : .off; app.updatePreferenceChanged() } }))
                 Text(app.updateLabel.stringValue).font(.callout).foregroundStyle(.secondary)
             } header: { Text("版本更新") } footer: { footerNote("稳定版仅检查正式发布；Beta 版也检查预发布。各渠道每天最多自动检查一次，不自动下载或安装。") }
-            Section("赞助") {
+            SettingsSection("赞助") {
                 Text("如果这个工具对你有帮助，欢迎自愿赞助。")
                 HStack(alignment: .top, spacing: 24) { sponsor("微信", file: "wechat", ext: "png"); sponsor("支付宝", file: "alipay", ext: "jpg") }.frame(maxWidth: .infinity)
             }
