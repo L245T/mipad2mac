@@ -346,13 +346,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
         if permissionsRefreshed { attemptAutoStart() }
         controlMode.selectedSegment = automaticControl.requested ? 1 : 0
-        controlSummary.textColor = enabled ? .systemGreen : (automaticControl.pending ? .systemOrange : .secondaryLabelColor)
+        controlSummary.textColor = enabled ? .systemGreen : (automaticControl.requested ? .systemOrange : .systemRed)
         statusLabel.textColor = reader.readyForControl ? .secondaryLabelColor : .systemOrange
-        controlSummary.stringValue = enabled ? "笔控制已开启" : (automaticControl.pending ? "等待设备或权限，准备自动启用" : "笔控制已暂停 · 系统原生处理")
+        if enabled { controlSummary.stringValue = "MiPad2Mac 控制已开启" }
+        else if !automaticControl.requested { controlSummary.stringValue = "原生处理可能不准确，建议使用软件控制" }
+        else if !permissionsReady { controlSummary.stringValue = "等待授权，尚未接管" }
+        else if !reader.readyForControl { controlSummary.stringValue = "等待受支持的笔设备，尚未接管" }
+        else if screenPicker.indexOfSelectedItem <= 0 { controlSummary.stringValue = "请选择目标显示器，尚未接管" }
+        else { controlSummary.stringValue = automaticControl.pending ? "等待目标就绪，尚未接管" : "尚未接管，请尝试重新连接" }
         if !enabled {
-            enableButton.title = automaticControl.pending ? "取消自动启用" : "启用鼠标控制"
+            enableButton.title = automaticControl.requested ? "取消软件控制" : "启用鼠标控制"
             if monitoring && automaticControl.pending { controlLabel.stringValue = permissionsReady ? "等待平板屏幕和受支持的笔接口，准备自动启用。" : "请完成权限申请，授权后自动启用。" }
         }
+    }
+    var controlStatusHelp: String {
+        if !automaticControl.requested {
+            return "macOS 直接处理触控笔，MiPad2Mac 不接管。光标可能在原来所在的屏幕移动，点击位置可能与笔尖不对应；下方选择的目标屏幕、旋转和翻转此时不生效。建议切换为 MiPad2Mac 控制。原生处理不等于禁用触控笔，也不影响 DP-in 画面。"
+        }
+        if enabled {
+            return "MiPad2Mac 独占已知的笔接口，避免 macOS 重复处理，将笔尖映射到目标屏幕并输出点击、拖动；开启压力与倾斜后，也向绘画软件发送数位笔数据。更改映射先结束当前笔画；切换为原生处理或退出后释放接口。DP-in 画面不受影响。"
+        }
+        return "已选择 MiPad2Mac 控制，但尚未成功接管。请检查目标显示器、受支持的笔设备和两项权限；必要时点击重新连接。只有显示绿色“控制已开启”才表示软件接管成功。等待期间 macOS 仍可能原生响应触控笔。"
     }
     var permissionsReady: Bool { accessibilityAllowed && postAllowed && inputAllowed }
     func attemptAutoStart() {
@@ -449,6 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func disable() {
         controlNotification.cancel()
         output.release(); enabled = false
+        statusLabel.stringValue = automaticControl.requested ? "软件控制已释放，等待设备和目标就绪。" : "macOS 原生处理，软件未接管。"
         reader.setExclusive(false)
         enableButton.title = "启用鼠标控制"
         statusItem?.button?.title = "HID"

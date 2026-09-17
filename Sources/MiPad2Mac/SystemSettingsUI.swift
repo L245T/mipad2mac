@@ -112,9 +112,13 @@ struct SettingsDetail: View {
                 SettingsPicker("处理方式", selection: Binding(get: { app.automaticControl.requested ? 1 : 0 }, set: { value in model.act { app.controlMode.selectedSegment = value; app.controlModeChanged() } })) {
                     Text("macOS 原生处理").tag(0); Text("MiPad2Mac 控制").tag(1)
                 }
-                LabeledContent("状态") { status(app.controlSummary.stringValue, good: app.enabled) }
+                HStack(spacing: 12) {
+                    Text("状态"); Spacer(minLength: 12)
+                    Text(app.controlSummary.stringValue).foregroundStyle(Color(nsColor: app.controlSummary.textColor ?? .secondaryLabelColor))
+                    ExplanationButton(text: app.controlStatusHelp, label: "处理方式说明")
+                }
             } footer: {
-                HStack { Text("当前仅支持触控笔输入。"); Spacer(); help("原生处理由 macOS 响应，位置可能不对应平板。MiPad2Mac 控制将笔尖映射至指定屏幕，支持点击、拖动、压力与倾斜。两种方式都不影响 DP-in 视频。") }
+                Text("当前仅支持触控笔输入。")
             }
             SettingsSection {
                 SettingsPicker("目标显示器", selection: Binding(get: { app.screenPicker.indexOfSelectedItem }, set: { value in model.act { app.screenPicker.selectItem(at: value); app.mappingChanged() } })) {
@@ -244,10 +248,11 @@ struct SettingsDetail: View {
 private final class ExplanationState: ObservableObject { @Published var shown = false }
 private struct ExplanationButton: View {
     let text: String
+    var label: String = "查看说明"
     @StateObject private var state = ExplanationState()
     var body: some View {
         Button { state.shown.toggle() } label: { Image(systemName: "questionmark.circle").foregroundStyle(.secondary) }
-            .buttonStyle(.plain).accessibilityLabel("查看说明")
-            .popover(isPresented: $state.shown) { Text(text).font(.callout).padding(16).frame(width: 320).fixedSize(horizontal: false, vertical: true) }
+            .buttonStyle(.plain).accessibilityLabel(label)
+            .popover(isPresented: $state.shown) { Text(text).font(.callout).multilineTextAlignment(.leading).padding(16).frame(width: 320).fixedSize(horizontal: false, vertical: true) }
     }
 }
