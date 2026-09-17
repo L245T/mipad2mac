@@ -220,7 +220,9 @@ struct SettingsDetail: View {
                     Image(nsImage: NSApp.applicationIconImage).resizable().scaledToFit().frame(width: 88, height: 88)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("MiPad2Mac \(appVersion)").font(.title2.bold())
-                        Text("代码摘要：\(appSourceRevision)").font(.caption).foregroundStyle(.secondary)
+                        Text("提交编号：\(appGitRevisionLabel)").font(.caption).foregroundStyle(.secondary)
+                            .help(appGitRevision.isEmpty ? "此构建尚未关联公开提交。" : "GitHub 提交：\(appGitRevision)")
+                        Text("内容校验：\(appSourceRevision)").font(.caption).foregroundStyle(.secondary)
                         Text("作者：力利欧 @L245T\nPowered by GPT6-Astra")
                     }
                 }.padding(.vertical, 8)

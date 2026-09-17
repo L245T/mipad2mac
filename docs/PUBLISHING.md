@@ -31,7 +31,28 @@ python3 scripts/export-source.py /tmp/mipad2mac-public-source
 
 日常修改和本地构建不自动提升数字版本或构建号。提交推送、升版、打标签和创建 Release 是分别授权的操作；用户要求“推送但不升版本”时，只提交推送审核后的修改。源码推送不代表安装包已发布。
 
-关于页显示源码及资源的 SHA-256 前 12 位，计算范围由 `scripts/source-revision.py` 定义。仅修改文档不触发构建、不更新代码摘要。赞助原图位于 `assets/sponsor/`，README 与应用共用，不重绘二维码。
+关于页同时显示提交编号与内容校验，含义见下节。仅修改文档不触发构建。赞助原图位于 `assets/sponsor/`，README 与应用共用，不重绘二维码。
+
+## 构建标识
+
+- **提交编号**：`MiPadGitRevision` 保存完整 Git commit SHA，关于页显示前 7 位，悬停可查看完整值，日志导出保留完整值。与该次构建所关联的 GitHub 提交相同，不等于仓库此后新增的最新提交。
+- **内容校验**：`MiPadSourceRevision` 保留 `scripts/source-revision.py` 计算的 SHA-256 前 12 位。范围是 Package.swift、Sources 下全部 Swift 文件、当前 v8 PNG 图标及 sponsor 资源；不含 Git 历史、文档、测试、构建脚本和二进制。它与提交编号不是同一种哈希。
+- `scripts/build-revision.py` 默认检查当前仓库，也可用 `MIPAD_REVISION_REPO` 指定公开参考仓库。参考仓库 origin 必须是本项目 GitHub 地址且工作区干净；脚本逐项比对实际打包输入与其 HEAD 已提交内容及文件清单。未匹配时普通构建显示本地测试；设置 `MIPAD_REQUIRE_GIT_REVISION=1` 则直接失败。
+- 此校验关联的是应用源码和图片输入，不保证不同工具链、依赖或打包环境产出相同二进制，也不证明提交已上传。上传状态须另用 Git 远端核对。
+
+最终构建顺序：测试通过 → 提交源码 → 正常推送并核对远端 → 构建。直接在干净的公开仓库可执行：
+
+```sh
+MIPAD_REQUIRE_GIT_REVISION=1 bash scripts/build-app.sh
+```
+
+开发仓库与公开历史分离时，指定经过审查并已推送的参考 checkout：
+
+```sh
+MIPAD_REVISION_REPO=/path/to/public-checkout MIPAD_REQUIRE_GIT_REVISION=1 bash scripts/build-app.sh
+```
+
+编号只在打包时注入 Info.plist，不写回 Swift 源码，因此不会出现“提交编号写入后又生成另一个提交”的循环。构建末尾重新检查输入和参考编号，变化时拒绝替换应用。构建前后禁止其他窗口修改同一源码；校验不能代替工作区互斥。数字版本与构建号不因注入编号而增加。
 
 ## 文档同步检查
 

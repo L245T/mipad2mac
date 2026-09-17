@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
 SOURCE_REVISION="$(python3 scripts/source-revision.py)"
+GIT_REVISION="$(python3 scripts/build-revision.py)"
 swift build -c release --disable-sandbox --cache-path .build/cache
 mkdir -p "$PWD/dist"
 STAGING="$(mktemp -d "$PWD/dist/.app-build.XXXXXX")"
@@ -32,6 +33,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 /usr/libexec/PlistBuddy -c "Add :MiPadSourceRevision string $SOURCE_REVISION" "$APP/Contents/Info.plist"
+# Check again in case another process changed build inputs.
+[[ "$SOURCE_REVISION" == "$(python3 scripts/source-revision.py)" ]] || { echo "Source changed during build; refusing package." >&2; exit 1; }
+[[ "$GIT_REVISION" == "$(python3 scripts/build-revision.py)" ]] || { echo "Reference changed during build; refusing package." >&2; exit 1; }
+if [[ -n "$GIT_REVISION" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :MiPadGitRevision string $GIT_REVISION" "$APP/Contents/Info.plist"
+fi
 # Replace the app only after the build and resource packaging succeed.
 DEST="$PWD/dist/MiPad2Mac.app"
 if [[ -d "$DEST" ]]; then
