@@ -13,6 +13,9 @@ enum NativeLayout {
         let row = NSStackView(views: views); row.spacing = 12; row.alignment = .centerY
         return row
     }
+    static func heading(_ title: String, help: String) -> NSStackView {
+        row([text(title, heading: true), HelpButton(title: title, explanation: help)])
+    }
     static func card(_ views: [NSView]) -> NSBox {
         let box = NSBox()
         box.boxType = .custom; box.titlePosition = .noTitle
@@ -137,5 +140,34 @@ final class NativeToggle: NSStackView {
     @objc private func changed() {
         refreshState()
         if let action { NSApp.sendAction(action, to: target, from: self) }
+    }
+}
+
+final class HelpButton: NSButton {
+    private let explanation: String
+    private var helpPopover: NSPopover?
+    init(title: String, explanation: String) {
+        self.explanation = explanation
+        super.init(frame: .zero)
+        bezelStyle = .helpButton
+        self.title = ""
+        toolTip = title + "说明"
+        setAccessibilityLabel(title + "说明")
+        target = self; action = #selector(showHelp)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func showHelp() {
+        if let helpPopover, helpPopover.isShown { helpPopover.close(); return }
+        let label = NativeLayout.text(explanation)
+        let width: CGFloat = 320
+        let height = ceil((explanation as NSString).boundingRect(with: NSSize(width: width, height: 2000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: NSFont.systemFont(ofSize: 13)]).height) + 8
+        let controller = NSViewController()
+        controller.view = NSView(frame: NSRect(x: 0, y: 0, width: width + 40, height: height + 40))
+        label.frame = NSRect(x: 20, y: 20, width: width, height: height)
+        controller.view.addSubview(label)
+        let popover = NSPopover()
+        popover.behavior = .transient; popover.contentViewController = controller
+        helpPopover = popover
+        popover.show(relativeTo: bounds, of: self, preferredEdge: .maxX)
     }
 }

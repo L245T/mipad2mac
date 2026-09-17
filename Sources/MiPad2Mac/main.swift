@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let controlSummary = NativeLayout.text("准备启用笔控制")
     let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
     let autoUpdate = NativeToggle("启动时检查更新（每天最多一次）")
+    let controlMode = NSSegmentedControl(labels: ["macOS 原生处理", "MiPad2Mac 控制"], trackingMode: .selectOne, target: nil, action: nil)
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
     let menuTablet = NSMenuItem(title: "压力与倾斜输出", action: nil, keyEquivalent: "")
@@ -119,22 +120,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         rateTestButton.target = self; rateTestButton.action = #selector(startRateTest)
         tabletToggle.target = self; tabletToggle.action = #selector(tabletModeChanged)
         tabletToggle.state = output.tabletEnabled ? .on : .off
+        controlMode.target = self; controlMode.action = #selector(controlModeChanged)
+        controlMode.controlSize = .large
+        controlMode.setAccessibilityLabel("输入处理方式")
         let controlPage = NativeLayout.page([
             NativeLayout.text("平板笔控制", heading: true),
-            NativeLayout.text("将平板上的笔操作映射到指定显示器。当前仅支持触控笔输入。"),
+            NativeLayout.text("当前仅支持触控笔输入。"),
             statusLabel,
-            NativeLayout.text("目标显示器（修改后暂停控制）", heading: true), screenPicker,
+            NativeLayout.card([
+                NativeLayout.heading("处理方式", help: "macOS 原生处理：MiPad2Mac 不接管笔，系统仍可能响应移动。本机测试中，光标可能留在原来的屏幕，点击位置不一定对应；目标屏幕、旋转和翻转不生效。切换到原生处理不等于禁用笔。\n\nMiPad2Mac 控制：将笔尖映射到指定显示器，支持点击、拖动和方向调整；压感与倾斜由下方开关控制。笔和触控板共用一个光标。缺少权限或设备时会显示待处理状态，授权后再启用。\n\n两种方式均不影响 DP-in 视频显示。"),
+                controlMode, controlSummary
+            ]),
+            NativeLayout.heading("目标显示器", help: "选择平板对应的显示器。尺寸是 macOS 逻辑坐标，不是视频分辨率。修改显示器、旋转或翻转后会暂停控制，请重新选择 MiPad2Mac 控制。"),
+            screenPicker,
             NativeLayout.row([NSTextField(labelWithString: "方向"), rotationPicker, flipX, flipY]),
-            NativeLayout.card([controlSummary, enableButton]),
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
-            NativeLayout.text("压力、倾斜与虚拟按键", heading: true),
+            NativeLayout.heading("压力与倾斜", help: "默认开启并记住选择，菜单栏 HID 也可切换。开启后传递压感与倾斜，关闭后使用普通鼠标输出。切换会结束当前笔画，但保留原有的控制或暂停状态。\n\n已在本机 Photoshop 2026 验证，其他软件和系统待验证。"),
             tabletToggle,
-            NativeLayout.text("默认开启并记住选择，也可通过菜单栏 HID 切换。开启后传递压感与倾斜，关闭后使用普通鼠标输出。切换会结束当前笔画；已开启的控制会继续，已暂停的控制保持暂停。已在本机 Photoshop 2026 验证，其他环境待验证。"),
-            NativeLayout.text("虚拟按键：捏、双击和滑动笔杆尚未识别到可用控制数据，目前不映射功能；报文采集保留在测试页。"),
-            NativeLayout.text("两种控制方式", heading: true),
-            NativeLayout.text("未开启 · macOS 原生处理\nMiPad2Mac 不接管笔，系统仍可能响应笔的移动。根据本机测试，光标可能留在原来的屏幕，点击与笔尖位置不一定对应；本页的目标屏幕、旋转和翻转设置不会生效。暂停控制不等于禁用触控笔。"),
-            NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标或手指触控；可通过上方开关选择数位笔输出，已在本机 Photoshop 2026 验证压感与倾斜，其他环境待验证。"),
-            NativeLayout.text("关闭窗口后的行为可在“设置”中选择；默认留在菜单栏继续控制。暂停或退出后恢复系统原生处理，视频显示不受影响。")
+            NativeLayout.row([NativeLayout.text("虚拟按键暂不支持"), HelpButton(title: "虚拟按键", explanation: "捏、双击和滑动笔杆尚未在已知笔接口观察到可用控制数据，目前不映射功能。报文采集位于测试页；这一结果不能证明其他接口收不到。")]),
+            NativeLayout.row([NativeLayout.text("关闭行为可在设置页调整"), HelpButton(title: "关闭窗口", explanation: "默认关闭窗口后留在菜单栏 HID 继续控制，并隐藏 Dock 图标。设置页可改为保留 Dock 或直接退出。暂停或退出会恢复系统原生处理，不影响视频显示。")])
         ])
         monitoringToggle.target = self; monitoringToggle.action = #selector(monitoringChanged)
         monitoringToggle.state = monitoring ? .on : .off
@@ -167,12 +171,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         logo.heightAnchor.constraint(equalToConstant: 112).isActive = true
         autoUpdate.target = self; autoUpdate.action = #selector(updatePreferenceChanged)
         autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
-        let aboutPage = NativeLayout.page([logo,
+        let aboutDetails = NSStackView(views: [
             NativeLayout.text("MiPad2Mac \(appVersion)", heading: true),
             NativeLayout.text("代码摘要：\(appSourceRevision)"),
             NativeLayout.text("作者：力利欧 @L245T\nPowered by GPT6-Astra"),
             NativeLayout.text("小米平板 DP-in 笔输入适配 · 开源实验项目"),
-            NSButton(title: "打开项目主页", target: self, action: #selector(openProject)),
+            NSButton(title: "打开项目主页", target: self, action: #selector(openProject))
+        ])
+        aboutDetails.orientation = .vertical; aboutDetails.alignment = .leading; aboutDetails.spacing = 10
+        let aboutHeader = NSStackView(views: [logo, aboutDetails])
+        aboutHeader.orientation = .horizontal; aboutHeader.alignment = .top; aboutHeader.spacing = 24
+        aboutHeader.distribution = .fill
+        for label in aboutDetails.arrangedSubviews where label is NSTextField {
+            label.widthAnchor.constraint(equalTo: aboutDetails.widthAnchor).isActive = true
+        }
+        let aboutPage = NativeLayout.page([aboutHeader,
             NativeLayout.text("版本更新", heading: true), updateLabel,
             NSButton(title: "检查更新…", target: self, action: #selector(checkUpdates)), autoUpdate,
             NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
@@ -182,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             sponsorSection.view,
             NativeLayout.text("使用微信或支付宝扫描对应二维码。看不清时可点击“查看原图”放大。")
         ])
+        aboutHeader.widthAnchor.constraint(equalTo: aboutPage.contentView.widthAnchor, constant: -48).isActive = true
         tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("测试", testPage), ("设置", settingsPage.view), ("关于", aboutPage)])
         NativeLayout.install(tabs, in: window)
     }
@@ -383,6 +397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
         attemptAutoStart()
+        controlMode.selectedSegment = enabled ? 1 : (automaticControl.pending ? -1 : 0)
         controlSummary.textColor = enabled ? .systemGreen : (automaticControl.pending ? .systemOrange : .secondaryLabelColor)
         statusLabel.textColor = reader.readyForControl ? .secondaryLabelColor : .systemOrange
         controlSummary.stringValue = enabled ? "笔控制已开启" : (automaticControl.pending ? "等待设备或权限，准备自动启用" : "笔控制已暂停 · 系统原生处理")
@@ -450,6 +465,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         test.makeKeyAndOrderFront(nil)
         test.makeFirstResponder(test.contentView)
         statusLabel.stringValue = "测试页已在目标屏幕打开。完整轻点计数增加才代表单击到达；橙色点应跟随笔尖。"
+    }
+    @objc func controlModeChanged() {
+        if controlMode.selectedSegment == 0 { pause() }
+        else if !enabled { automaticControl.request(); refreshPermissions() }
+        controlMode.selectedSegment = enabled ? 1 : (automaticControl.pending ? -1 : 0)
     }
     @objc func toggle() {
         if enabled || automaticControl.pending { pause(); return }
