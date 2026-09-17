@@ -13,6 +13,30 @@ enum NativeLayout {
         let row = NSStackView(views: views); row.spacing = 12; row.alignment = .centerY
         return row
     }
+    static func card(_ views: [NSView]) -> NSBox {
+        let box = NSBox()
+        box.boxType = .custom; box.titlePosition = .noTitle
+        box.cornerRadius = 10; box.borderWidth = 1
+        box.borderColor = .separatorColor; box.fillColor = .controlBackgroundColor
+        box.contentViewMargins = NSSize(width: 16, height: 14)
+        let stack = NSStackView(views: views)
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        let content = NSView()
+        box.contentView = content
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            box.heightAnchor.constraint(equalTo: stack.heightAnchor, constant: 28)
+        ])
+        for view in views where view is NSTextField {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return box
+    }
     static func page(_ views: [NSView]) -> NSScrollView {
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         let doc = Document(); doc.translatesAutoresizingMaskIntoConstraints = false
@@ -27,7 +51,7 @@ enum NativeLayout {
             stack.topAnchor.constraint(equalTo: doc.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -24)
         ])
-        for view in views where view is NSTextField || view is NSPopUpButton || view is NSScrollView {
+        for view in views where view is NSTextField || view is NSPopUpButton || view is NSScrollView || view is NSBox || view is NativeToggle {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return scroll
@@ -58,7 +82,8 @@ final class PermissionPage {
         view = NativeLayout.page([
             NativeLayout.text("权限检查", heading: true),
             NativeLayout.text("当前仅支持触控笔输入。授权完成后会自动尝试启用笔的鼠标控制。"),
-            controlStatus, controlButton, inputStatus, inputButton,
+            NativeLayout.card([NativeLayout.text("控制与事件发送", heading: true), controlStatus, controlButton]),
+            NativeLayout.card([NativeLayout.text("输入监控", heading: true), inputStatus, inputButton]),
             NSButton(title: "重新检查", target: owner, action: #selector(AppDelegate.refreshPermissions)),
             NativeLayout.text("控制权限在 macOS 27 中名为“设备控制和数据访问”，旧系统名为“辅助功能”。输入监控授权后可能需要重新启动应用。已授权的按钮会禁用。")
         ])
@@ -66,9 +91,51 @@ final class PermissionPage {
     func update(control: Bool, input: Bool, post: Bool) {
         controlStatus.stringValue = "控制权限：\(control ? "已授权" : "未授权") · 鼠标事件发送：\(post ? "已允许" : "未允许")"
         inputStatus.stringValue = "输入监控：\(input ? "已授权" : "未授权")"
+        controlStatus.textColor = control && post ? .systemGreen : .systemOrange
+        inputStatus.textColor = input ? .systemGreen : .systemOrange
+        controlStatus.font = .systemFont(ofSize: 14, weight: .medium)
+        inputStatus.font = .systemFont(ofSize: 14, weight: .medium)
         controlButton.isEnabled = !(control && post)
         inputButton.isEnabled = !input
         controlButton.title = control && post ? "控制权限已授权" : "申请控制权限…"
         inputButton.title = input ? "输入监控已授权" : "申请输入监控权限…"
+    }
+}
+
+/// A labeled native switch with an explicit text state in a full-width row.
+final class NativeToggle: NSStackView {
+    private let toggle = NSSwitch()
+    private let status = NSTextField(labelWithString: "")
+    weak var target: AnyObject?
+    var action: Selector?
+    var statusText: String? { didSet { refreshState() } }
+    var state: NSControl.StateValue {
+        get { toggle.state }
+        set { toggle.state = newValue; refreshState() }
+    }
+    init(_ title: String) {
+        super.init(frame: .zero)
+        orientation = .horizontal; alignment = .centerY; spacing = 12; distribution = .fill
+        edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 10, right: 0)
+        let label = NSTextField(wrappingLabelWithString: title)
+        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        status.font = .systemFont(ofSize: 12, weight: .medium)
+        status.setContentCompressionResistancePriority(.required, for: .horizontal)
+        toggle.setContentHuggingPriority(.required, for: .horizontal)
+        toggle.setContentCompressionResistancePriority(.required, for: .horizontal)
+        toggle.setAccessibilityLabel(title)
+        toggle.target = self; toggle.action = #selector(changed)
+        addArrangedSubview(label); addArrangedSubview(status); addArrangedSubview(toggle)
+        refreshState()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    private func refreshState() {
+        status.stringValue = statusText ?? (state == .on ? "已开启" : "已关闭")
+        status.textColor = statusText != nil ? .systemOrange : (state == .on ? .systemGreen : .secondaryLabelColor)
+    }
+    @objc private func changed() {
+        refreshState()
+        if let action { NSApp.sendAction(action, to: target, from: self) }
     }
 }

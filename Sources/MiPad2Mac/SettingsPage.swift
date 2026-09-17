@@ -10,7 +10,7 @@ enum CloseBehavior: Int {
 
 final class SettingsPage: NSObject {
     let closePicker = NSPopUpButton()
-    let loginToggle = NSButton(checkboxWithTitle: "登录 Mac 时自动启动", target: nil, action: nil)
+    let loginToggle = NativeToggle("登录 Mac 时自动启动")
     let loginStatus = NativeLayout.text("")
     let loginError = NativeLayout.text("")
     var view: NSView!
@@ -36,6 +36,9 @@ final class SettingsPage: NSObject {
     @objc func refresh() {
         let status = SMAppService.mainApp.status
         loginToggle.state = (status == .enabled || status == .requiresApproval) ? .on : .off
+        loginToggle.statusText = status == .requiresApproval ? "待批准" : nil
+        loginError.textColor = .systemRed
+        loginStatus.textColor = status == .enabled ? .systemGreen : (status == .notRegistered ? .secondaryLabelColor : .systemOrange)
         switch status {
         case .enabled: loginStatus.stringValue = "自启动：已开启"
         case .requiresApproval: loginStatus.stringValue = "自启动：等待系统批准，请打开登录项设置允许 MiPad2Mac。"

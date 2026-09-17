@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let sponsorSection = SponsorSection()
     let controlSummary = NativeLayout.text("准备启用笔控制")
     let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
-    let autoUpdate = NSButton(checkboxWithTitle: "启动时检查更新（每天最多一次）", target: nil, action: nil)
+    let autoUpdate = NativeToggle("启动时检查更新（每天最多一次）")
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
     let menuTablet = NSMenuItem(title: "压力与倾斜输出", action: nil, keyEquivalent: "")
@@ -29,9 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let rateTestLabel = NSTextField(wrappingLabelWithString: "测试会记录 15 秒实际输入；请持续用笔画圈。无需启用鼠标控制。")
     let rateTestButton = NSButton(title: "测试输入速率（15 秒）", target: nil, action: nil)
     var monitoring = UserDefaults.standard.bool(forKey: "testMonitoringEnabled")
-    let monitoringToggle = NSButton(checkboxWithTitle: "开启测试监控与日志", target: nil, action: nil)
+    let monitoringToggle = NativeToggle("开启测试监控与日志")
     let recordStateButton = NSButton(title: "记录当前状态", target: nil, action: nil)
-    let tabletToggle = NSButton(checkboxWithTitle: "输出数位笔压力与倾斜", target: nil, action: nil)
+    let tabletToggle = NativeToggle("输出数位笔压力与倾斜")
     let capturePicker = NSPopUpButton()
     let captureButton = NSButton(title: "开始 30 秒笔报文采集", target: nil, action: nil)
     let captureLabel = NativeLayout.text("尚未采集；每次选择一个操作，采集前后静置作对照。")
@@ -114,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         for control in [flipX, flipY] { control.target = self; control.action = #selector(mappingChanged) }
         enableButton.target = self; enableButton.action = #selector(toggle)
         enableButton.bezelStyle = .rounded
+        enableButton.controlSize = .large
+        controlSummary.font = .systemFont(ofSize: 15, weight: .semibold)
         rateTestButton.target = self; rateTestButton.action = #selector(startRateTest)
         tabletToggle.target = self; tabletToggle.action = #selector(tabletModeChanged)
         tabletToggle.state = output.tabletEnabled ? .on : .off
@@ -123,8 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             statusLabel,
             NativeLayout.text("目标显示器（修改后暂停控制）", heading: true), screenPicker,
             NativeLayout.row([NSTextField(labelWithString: "方向"), rotationPicker, flipX, flipY]),
-            controlSummary,
-            enableButton,
+            NativeLayout.card([controlSummary, enableButton]),
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
             NativeLayout.text("压力、倾斜与虚拟按键", heading: true),
             tabletToggle,
@@ -382,6 +383,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
         attemptAutoStart()
+        controlSummary.textColor = enabled ? .systemGreen : (automaticControl.pending ? .systemOrange : .secondaryLabelColor)
+        statusLabel.textColor = reader.readyForControl ? .secondaryLabelColor : .systemOrange
         controlSummary.stringValue = enabled ? "笔控制已开启" : (automaticControl.pending ? "等待设备或权限，准备自动启用" : "笔控制已暂停 · 系统原生处理")
         if !enabled {
             enableButton.title = automaticControl.pending ? "取消自动启用" : "启用鼠标控制"
