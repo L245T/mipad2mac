@@ -167,7 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func menuWillOpen(_ menu: NSMenu) {
         menuState.title = "笔接口：\(reader.deviceCount > 0 ? "已连接" : "未连接") · \(enabled ? "控制中" : "已暂停")"
-        menuControl.title = enabled ? "暂停鼠标控制" : (automaticControl.pending ? "取消自动启用" : "启用鼠标控制")
+        menuControl.title = enabled ? "暂停鼠标控制" : (automaticControl.requested ? "取消软件控制" : "启用鼠标控制")
         menuControl.isEnabled = true
         menuTablet.state = output.tabletEnabled ? .on : .off
         let screens = NSMenu(); screens.autoenablesItems = false
@@ -345,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
         if permissionsRefreshed { attemptAutoStart() }
-        controlMode.selectedSegment = enabled ? 1 : (automaticControl.pending ? -1 : 0)
+        controlMode.selectedSegment = automaticControl.requested ? 1 : 0
         controlSummary.textColor = enabled ? .systemGreen : (automaticControl.pending ? .systemOrange : .secondaryLabelColor)
         statusLabel.textColor = reader.readyForControl ? .secondaryLabelColor : .systemOrange
         controlSummary.stringValue = enabled ? "笔控制已开启" : (automaticControl.pending ? "等待设备或权限，准备自动启用" : "笔控制已暂停 · 系统原生处理")
@@ -417,10 +417,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func controlModeChanged() {
         if controlMode.selectedSegment == 0 { pause() }
         else if !enabled { automaticControl.request(); refreshPermissions() }
-        controlMode.selectedSegment = enabled ? 1 : (automaticControl.pending ? -1 : 0)
+        controlMode.selectedSegment = automaticControl.requested ? 1 : 0
     }
     @objc func toggle() {
-        if enabled || automaticControl.pending { pause(); return }
+        if automaticControl.requested { pause(); return }
         automaticControl.request()
         refreshPermissions()
     }
@@ -432,7 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return
         }
         let id = displays[index]
-        guard CGDisplayIsActive(id) != 0 else { displayChanged(); return }
+        guard CGDisplayIsActive(id) != 0 else { statusLabel.stringValue = "目标显示器当前不可用，等待重新连接。"; return }
         guard reader.setExclusive(true) else { return }
         output.mapping = Mapping(bounds: CGDisplayBounds(id), rotation: rotationPicker.indexOfSelectedItem * 90,
                                  flipX: flipX.state == .on, flipY: flipY.state == .on)
@@ -454,7 +454,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         statusItem?.button?.title = "HID"
     }
     @objc func pause() { automaticNotificationPending = false; automaticControl.pause(); disable(); statusLabel.stringValue = "鼠标控制已暂停" }
-    @objc func mappingChanged() { pause() }
+    @objc func mappingChanged() {
+        guard automaticControl.requested else { return }
+        let index = screenPicker.indexOfSelectedItem - 1
+        if enabled, displays.indices.contains(index), CGDisplayIsActive(displays[index]) != 0 {
+            // End the old stroke/proximity before changing coordinate systems; keep the pen seized.
+            output.release()
+            output.mapping = Mapping(bounds: CGDisplayBounds(displays[index]), rotation: rotationPicker.indexOfSelectedItem * 90,
+                                     flipX: flipX.state == .on, flipY: flipY.state == .on)
+            statusLabel.stringValue = "映射已更新，MiPad2Mac 控制继续。"
+        } else {
+            disable()
+            automaticControl.retryIfRequested()
+            attemptAutoStart()
+        }
+        tabs?.model.sync()
+    }
     func connectionChanged() {
         refreshScreens()
         if let target = connection.observe(penReady: reader.readyForControl, displayIDs: tabletDisplayIDs),
@@ -467,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         attemptAutoStart()
         tabs?.model.sync()
     }
-    @objc func displayChanged() { disable(); connectionChanged() }
+    @objc func displayChanged() { connectionChanged(); mappingChanged() }
     @objc func reconnect() {
         finishPenCapture(reason: "重新连接"); disable(); reader.stop(); reader.resetDiagnostics()
         rateTime = ProcessInfo.processInfo.systemUptime; rateReports = 0

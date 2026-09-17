@@ -17,7 +17,7 @@ final class SettingsPresentation: ObservableObject {
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
-            String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
+            String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
             String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue)]
             + (app.monitoring ? [app.countsLabel.stringValue, app.sampleLabel.stringValue, app.packetLabel.stringValue, app.controlLabel.stringValue, app.testRecord.displayText] : [])
         let next = fields.joined(separator: "\u{1f}")
@@ -109,7 +109,7 @@ struct SettingsDetail: View {
     private var control: some View {
         Group {
             SettingsSection {
-                SettingsPicker("处理方式", selection: Binding(get: { app.enabled || app.automaticControl.pending ? 1 : 0 }, set: { value in model.act { app.controlMode.selectedSegment = value; app.controlModeChanged() } })) {
+                SettingsPicker("处理方式", selection: Binding(get: { app.automaticControl.requested ? 1 : 0 }, set: { value in model.act { app.controlMode.selectedSegment = value; app.controlModeChanged() } })) {
                     Text("macOS 原生处理").tag(0); Text("MiPad2Mac 控制").tag(1)
                 }
                 LabeledContent("状态") { status(app.controlSummary.stringValue, good: app.enabled) }
@@ -125,7 +125,7 @@ struct SettingsDetail: View {
                 }
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
-            } header: { Text("显示器") } footer: { footerNote("修改映射后会暂停控制，请重新启用。显示器尺寸为逻辑坐标。") }
+            } header: { Text("显示器") } footer: { footerNote("修改映射会结束当前笔画，处理方式保持不变。显示器尺寸为逻辑坐标。") }
             SettingsSection("笔输入") {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); Text("向绘画软件传递数位笔数据。")
