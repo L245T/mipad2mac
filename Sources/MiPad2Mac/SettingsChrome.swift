@@ -174,3 +174,13 @@ struct SettingsPicker<Selection: Hashable, Content: View>: View {
         }
     }
 }
+
+/// An AppKit background covers the titlebar region too; no SwiftUI safe-area inset.
+final class OpaqueSidebarBackground: NSView {
+    override var isOpaque: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        bounds.fill()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}

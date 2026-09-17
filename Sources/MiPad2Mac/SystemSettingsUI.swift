@@ -48,6 +48,7 @@ final class SystemSettingsController: NSSplitViewController {
     func install(in window: NSWindow) {
         window.contentViewController = self
         window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.toolbarStyle = .unified
         let toolbar = NSToolbar(identifier: "MiPadSettingsToolbar")
         toolbar.showsBaselineSeparator = true
@@ -68,7 +69,7 @@ final class SystemSettingsController: NSSplitViewController {
         let enabled = UserDefaults.standard.object(forKey: "sidebarTransparency") as? Bool ?? true
         if !enabled || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             if opaqueSidebar == nil {
-                let background = NSHostingView(rootView: Color(nsColor: .windowBackgroundColor))
+                let background = OpaqueSidebarBackground()
                 background.frame = sidebar.bounds; background.autoresizingMask = [.width, .height]
                 sidebar.addSubview(background, positioned: .below, relativeTo: nil); opaqueSidebar = background
             }
