@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let packetLabel = NSTextField(wrappingLabelWithString: "")
     let sampleLabel = NSTextField(wrappingLabelWithString: "尚未收到坐标")
     let permissionsLabel = NSTextField(wrappingLabelWithString: "")
-    let controlLabel = NSTextField(wrappingLabelWithString: "控制未启用：选择屏幕尚不生效；笔的移动来自系统原生处理。")
+    let controlLabel = NSTextField(wrappingLabelWithString: "MiPad2Mac 控制未启用：目标屏幕映射不生效，macOS 仍可能响应触控笔。")
     let screenPicker = NSPopUpButton()
     let rotationPicker = NSPopUpButton()
     let flipX = NSButton(checkboxWithTitle: "水平翻转", target: nil, action: nil)
@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.delegate = self
-        window.title = "MiPad2Mac \(appVersion) · 实验版"
+        window.title = "MiPad2Mac \(appVersion)"
         window.minSize = NSSize(width: 720, height: 580)
         window.setFrameAutosaveName("MiPadMainWindow")
         window.center(); window.isReleasedWhenClosed = false
@@ -331,7 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         rateTime = now; rateReports = reader.reports; rateOutput = totalOutput
         controlLabel.stringValue = enabled
             ? "控制已启用 · 已提交按下/抬起：\(output.downCount)/\(output.upCount) · 移动/拖动：\(output.moveCount)/\(output.dragCount)\n定位调用：\(output.lastWarpError == .success ? "成功（待测试页验收）" : "失败")"
-            : "控制未启用：选择屏幕尚不生效；笔的移动来自系统原生处理。"
+            : "MiPad2Mac 控制未启用：目标屏幕映射不生效，macOS 仍可能响应触控笔。"
         controlLabel.textColor = enabled ? .systemGreen : .systemOrange
         if enabled, let cursor = CGEvent(source: nil)?.location {
             controlLabel.stringValue += String(format: "\n目标点 %.0f, %.0f · 当前光标 %.0f, %.0f", output.lastPoint.x, output.lastPoint.y, cursor.x, cursor.y)
@@ -340,7 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let sample = latestSample {
             sampleLabel.stringValue = String(format: "X %.3f · Y %.3f · 接触 %@ · 范围内 %@ · 压感 %d",
                 sample.x, sample.y, sample.touching ? "是" : "否", sample.inRange ? "是" : "否", sample.pressure)
-            sampleLabel.stringValue += "\n倾斜 X \(sample.tiltX)° / Y \(sample.tiltY)° · barrel \(sample.barrel) · eraser \(sample.eraser) · 有效位置 \(sample.positionValid)\n实验数位笔输出 \(output.tabletEnabled ? "开" : "关") · 接近/离开提交 \(output.proximityCount)"
+            sampleLabel.stringValue += "\n倾斜 X \(sample.tiltX)° / Y \(sample.tiltY)° · barrel \(sample.barrel) · eraser \(sample.eraser) · 有效位置 \(sample.positionValid)\n压力与倾斜输出 \(output.tabletEnabled ? "开" : "关") · 接近/离开提交 \(output.proximityCount)"
         }
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
@@ -349,14 +349,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         controlSummary.textColor = enabled ? .systemGreen : (automaticControl.requested ? .systemOrange : .systemRed)
         statusLabel.textColor = reader.readyForControl ? .secondaryLabelColor : .systemOrange
         if enabled { controlSummary.stringValue = "MiPad2Mac 控制已开启" }
-        else if !automaticControl.requested { controlSummary.stringValue = "原生处理可能不准确，建议使用软件控制" }
+        else if !automaticControl.requested { controlSummary.stringValue = "由 macOS 处理，未启用平板坐标映射" }
         else if !permissionsReady { controlSummary.stringValue = "等待授权，尚未接管" }
         else if !reader.readyForControl { controlSummary.stringValue = "等待受支持的笔设备，尚未接管" }
         else if screenPicker.indexOfSelectedItem <= 0 { controlSummary.stringValue = "请选择目标显示器，尚未接管" }
         else { controlSummary.stringValue = automaticControl.pending ? "等待目标就绪，尚未接管" : "尚未接管，请尝试重新连接" }
         if !enabled {
             enableButton.title = automaticControl.requested ? "取消软件控制" : "启用鼠标控制"
-            if monitoring && automaticControl.pending { controlLabel.stringValue = permissionsReady ? "等待平板屏幕和受支持的笔接口，准备自动启用。" : "请完成权限申请，授权后自动启用。" }
+            if monitoring && automaticControl.pending { controlLabel.stringValue = permissionsReady ? "等待平板屏幕和受支持的笔接口，准备自动启用。" : "请完成授权；设备和目标屏幕就绪后尝试启用。" }
         }
     }
     var controlStatusHelp: String {
@@ -366,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if enabled {
             return "MiPad2Mac 独占已知的笔接口，避免 macOS 重复处理，将笔尖映射到目标屏幕并输出点击、拖动；开启压力与倾斜后，也向绘画软件发送数位笔数据。更改映射先结束当前笔画；切换为原生处理或退出后释放接口。DP-in 画面不受影响。"
         }
-        return "已选择 MiPad2Mac 控制，但尚未成功接管。请检查目标显示器、受支持的笔设备和两项权限；必要时点击重新连接。只有显示绿色“控制已开启”才表示软件接管成功。等待期间 macOS 仍可能原生响应触控笔。"
+        return "已选择 MiPad2Mac 控制，但尚未成功接管。请检查目标显示器、受支持的笔设备和两项权限；必要时点击重新连接。只有显示“MiPad2Mac 控制已开启”才表示软件接管成功。等待期间 macOS 仍可能原生响应触控笔。"
     }
     var permissionsReady: Bool { accessibilityAllowed && postAllowed && inputAllowed }
     func attemptAutoStart() {
@@ -453,7 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         enabled = true
         enableButton.title = "暂停鼠标控制"
         statusItem.button?.title = "HID"
-        statusLabel.stringValue = "控制已启用，已独占笔接口以避免系统重复处理；暂停即恢复。"
+        statusLabel.stringValue = "笔接口由 MiPad2Mac 使用；切换为原生处理后交还 macOS。"
         if automaticNotificationPending {
             automaticNotificationPending = false
             statusLabel.stringValue = "平板触控笔已由 MiPad2Mac 控制，已自动选择平板屏幕。"
