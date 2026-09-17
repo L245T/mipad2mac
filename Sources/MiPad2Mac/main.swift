@@ -3,7 +3,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.1"
 let appSourceRevision = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "本地调试"
 
 
@@ -24,13 +24,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let autoUpdate = NSButton(checkboxWithTitle: "启动时检查更新（每天最多一次）", target: nil, action: nil)
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
+    let menuTablet = NSMenuItem(title: "压力与倾斜输出", action: nil, keyEquivalent: "")
     let menuScreens = NSMenuItem(title: "目标显示器", action: nil, keyEquivalent: "")
     let rateTestLabel = NSTextField(wrappingLabelWithString: "测试会记录 15 秒实际输入；请持续用笔画圈。无需启用鼠标控制。")
     let rateTestButton = NSButton(title: "测试输入速率（15 秒）", target: nil, action: nil)
     var monitoring = UserDefaults.standard.bool(forKey: "testMonitoringEnabled")
     let monitoringToggle = NSButton(checkboxWithTitle: "开启测试监控与日志", target: nil, action: nil)
     let recordStateButton = NSButton(title: "记录当前状态", target: nil, action: nil)
-    let tabletToggle = NSButton(checkboxWithTitle: "实验：输出数位笔压力与倾斜（本次启动有效）", target: nil, action: nil)
+    let tabletToggle = NSButton(checkboxWithTitle: "输出数位笔压力与倾斜", target: nil, action: nil)
     let capturePicker = NSPopUpButton()
     let captureButton = NSButton(title: "开始 30 秒笔报文采集", target: nil, action: nil)
     let captureLabel = NativeLayout.text("尚未采集；每次选择一个操作，采集前后静置作对照。")
@@ -69,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
         }
+        UserDefaults.standard.register(defaults: ["tabletOutputEnabled": true])
+        output.tabletEnabled = UserDefaults.standard.bool(forKey: "tabletOutputEnabled")
         buildWindow()
         buildMenu()
         refreshScreens()
@@ -112,6 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         enableButton.target = self; enableButton.action = #selector(toggle)
         enableButton.bezelStyle = .rounded
         rateTestButton.target = self; rateTestButton.action = #selector(startRateTest)
+        tabletToggle.target = self; tabletToggle.action = #selector(tabletModeChanged)
+        tabletToggle.state = output.tabletEnabled ? .on : .off
         let controlPage = NativeLayout.page([
             NativeLayout.text("平板笔控制", heading: true),
             NativeLayout.text("将平板上的笔操作映射到指定显示器。当前仅支持触控笔输入。"),
@@ -121,15 +126,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             controlSummary,
             enableButton,
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
+            NativeLayout.text("压力、倾斜与虚拟按键", heading: true),
+            tabletToggle,
+            NativeLayout.text("默认开启并记住选择，也可通过菜单栏 HID 切换。开启后传递压感与倾斜，关闭后使用普通鼠标输出。切换会结束当前笔画；已开启的控制会继续，已暂停的控制保持暂停。已在本机 Photoshop 2026 验证，其他环境待验证。"),
+            NativeLayout.text("虚拟按键：捏、双击和滑动笔杆尚未识别到可用控制数据，目前不映射功能；报文采集保留在测试页。"),
             NativeLayout.text("两种控制方式", heading: true),
             NativeLayout.text("未开启 · macOS 原生处理\nMiPad2Mac 不接管笔，系统仍可能响应笔的移动。根据本机测试，光标可能留在原来的屏幕，点击与笔尖位置不一定对应；本页的目标屏幕、旋转和翻转设置不会生效。暂停控制不等于禁用触控笔。"),
-            NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标或手指触控；测试页可选择实验性数位笔输出，已在本机 Photoshop 2026 验证压感与倾斜，其他环境待验证。"),
+            NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标或手指触控；可通过上方开关选择数位笔输出，已在本机 Photoshop 2026 验证压感与倾斜，其他环境待验证。"),
             NativeLayout.text("关闭窗口后的行为可在“设置”中选择；默认留在菜单栏继续控制。暂停或退出后恢复系统原生处理，视频显示不受影响。")
         ])
         monitoringToggle.target = self; monitoringToggle.action = #selector(monitoringChanged)
         monitoringToggle.state = monitoring ? .on : .off
         recordStateButton.target = self; recordStateButton.action = #selector(recordTestState)
-        tabletToggle.target = self; tabletToggle.action = #selector(tabletModeChanged)
         capturePicker.addItems(withTitles: ["轻压与重压", "左右与前后倾斜", "捏笔杆", "双击笔杆", "滑动笔杆", "静置与普通落笔对照"])
         captureButton.target = self; captureButton.action = #selector(startPenCapture)
         let testPage = NativeLayout.page([
@@ -141,9 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NativeLayout.text("控制输出", heading: true), controlLabel,
             NativeLayout.text("笔输入状态", heading: true), countsLabel, packetLabel, sampleLabel,
             rateTestButton, rateTestLabel,
-            NativeLayout.text("压力、倾斜与虚拟按键", heading: true),
-            tabletToggle,
-            NativeLayout.text("实验输出使用公开数位笔事件字段；已在本机 Photoshop 2026 验证压感与倾斜；其他环境待验证。切换会暂停控制，需回控制页重新启用。关闭可恢复普通鼠标输出；虚拟按键不映射任何操作。"),
+            NativeLayout.text("笔报文诊断", heading: true),
             capturePicker, captureButton, captureLabel,
             NativeLayout.text("仅在测试监控开启时采集已打开的笔接口，保留解析前原始报文、时间及变化位。每次最多 30 秒、12000 条、2 MiB，超限计数。导出包含最近一次采集；新采集会替换上一段原始数据。"),
             NativeLayout.text("测试与调试记录", heading: true),
@@ -186,6 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false
         menuState.isEnabled = false; menu.addItem(menuState)
         menuControl.target = self; menuControl.action = #selector(menuToggle); menu.addItem(menuControl)
+        menuTablet.target = self; menuTablet.action = #selector(menuToggleTablet); menu.addItem(menuTablet)
+        menuTablet.state = output.tabletEnabled ? .on : .off
         menu.addItem(menuScreens); menu.addItem(.separator())
         for (title, action, key) in [("打开控制窗口", #selector(showWindow), ""), ("设置…", #selector(showSettings), ""), ("权限检查…", #selector(showPermissions), ""), ("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
@@ -202,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menuState.title = "笔接口：\(reader.deviceCount > 0 ? "已连接" : "未连接") · \(enabled ? "控制中" : "已暂停")"
         menuControl.title = enabled ? "暂停鼠标控制" : (automaticControl.pending ? "取消自动启用" : "启用鼠标控制")
         menuControl.isEnabled = true
+        menuTablet.state = output.tabletEnabled ? .on : .off
         let screens = NSMenu(); screens.autoenablesItems = false
         for (index, _) in displays.enumerated() {
             let item = NSMenuItem(title: screenPicker.itemTitle(at: index + 1), action: #selector(menuSelectScreen(_:)), keyEquivalent: "")
@@ -287,10 +296,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         testRecord.append("控制：\(enabled ? "已开启" : "未开启") · \(screenPicker.titleOfSelectedItem ?? "未选择屏幕")\n\(permissionsLabel.stringValue)\n\(countsLabel.stringValue)\n\(sampleLabel.stringValue)\n\(packetLabel.stringValue)")
     }
     @objc func exportTestRecord() { testRecord.save(in: window, extra: reader.penCapture?.export ?? "") }
-    @objc func tabletModeChanged() {
-        pause()
-        output.tabletEnabled = tabletToggle.state == .on
-        testRecord.append("数位笔实验输出：\(output.tabletEnabled ? "开启" : "关闭")；控制已暂停，需重新启用。")
+    @objc func tabletModeChanged() { setTabletOutput(tabletToggle.state == .on) }
+    @objc func menuToggleTablet() { setTabletOutput(!output.tabletEnabled) }
+    func setTabletOutput(_ active: Bool) {
+        // Release under the old event mode before switching; keep control/pause ownership intact.
+        output.release()
+        output.tabletEnabled = active
+        UserDefaults.standard.set(active, forKey: "tabletOutputEnabled")
+        tabletToggle.state = active ? .on : .off
+        menuTablet.state = active ? .on : .off
+        testRecord.append("压力与倾斜输出：\(active ? "开启" : "关闭")；已结束当前笔画，控制状态保持不变。")
     }
     @objc func startPenCapture() {
         guard monitoring, !captureActive, reader.deviceCount == 1 else { return }
