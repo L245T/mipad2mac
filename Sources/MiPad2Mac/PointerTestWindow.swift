@@ -13,9 +13,25 @@ final class PointerTestView: NSView {
     var lastMessage = "请用笔轻点中央及四角，再拖动。此页区分桥接事件与系统原生事件。"
     private var downPoint: CGPoint?
     private var dragged = false
+    var tabletMessage = "尚未收到数位笔事件"
+    private var lastTabletLog = -Double.infinity
+    private func inspectTablet(_ event: NSEvent) {
+        guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag,
+              event.subtype == .tabletPoint || event.type == .tabletPoint else { return }
+        let tilt = event.tilt
+        tabletMessage = String(format: "本窗口收到：压力 %.4f · 倾斜 %.3f / %.3f · deviceID %d", event.pressure, tilt.x, tilt.y, event.deviceID)
+        if event.timestamp - lastTabletLog >= 0.5 { record(tabletMessage); lastTabletLog = event.timestamp }
+        needsDisplay = true
+    }
+    override func tabletPoint(with event: NSEvent) { inspectTablet(event) }
+    override func tabletProximity(with event: NSEvent) {
+        guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag else { return }
+        record("本窗口收到数位笔接近事件：\(event.isEnteringProximity) · deviceID \(event.deviceID)")
+    }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
+        inspectTablet(event)
         cursor = convert(event.locationInWindow, from: nil)
         if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag {
             bridgeDown += 1; downPoint = cursor; dragged = false
@@ -28,11 +44,13 @@ final class PointerTestView: NSView {
         needsDisplay = true
     }
     override func mouseDragged(with event: NSEvent) {
+        inspectTablet(event)
         cursor = convert(event.locationInWindow, from: nil)
         if let downPoint, hypot(cursor.x - downPoint.x, cursor.y - downPoint.y) >= 4 { dragged = true }
         needsDisplay = true
     }
     override func mouseUp(with event: NSEvent) {
+        inspectTablet(event)
         cursor = convert(event.locationInWindow, from: nil)
         if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag {
             bridgeUp += 1
@@ -46,16 +64,20 @@ final class PointerTestView: NSView {
         needsDisplay = true
     }
     override func mouseMoved(with event: NSEvent) {
+        inspectTablet(event)
         cursor = convert(event.locationInWindow, from: nil); needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill(); bounds.fill()
         let title = "MiPad2Mac 输入验收"
-        title.draw(at: NSPoint(x: 24, y: bounds.height - 55), withAttributes: [.font: NSFont.boldSystemFont(ofSize: 24), .foregroundColor: NSColor.labelColor])
-        let detail = "桥接按下 \(bridgeDown) / 抬起 \(bridgeUp) / 完整轻点 \(bridgeClicks)　·　其他来源按下 \(systemDown)\n\(lastMessage)"
-        detail.draw(in: NSRect(x: 24, y: bounds.height - 125, width: bounds.width - 48, height: 62), withAttributes: [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.labelColor])
+        title.draw(in: NSRect(x: 24, y: bounds.height - 58, width: max(0, bounds.width - 48), height: 34), withAttributes: [.font: NSFont.boldSystemFont(ofSize: 24), .foregroundColor: NSColor.labelColor])
+        let detail = "桥接按下 \(bridgeDown) / 抬起 \(bridgeUp) / 完整轻点 \(bridgeClicks)　·　其他来源按下 \(systemDown)\n\(lastMessage)\n\(tabletMessage)"
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 5
+        detail.draw(in: NSRect(x: 24, y: bounds.height - 182, width: max(0, bounds.width - 48), height: 110), withAttributes: [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph])
+        let canvasHeight = max(0, bounds.height - 200)
         for (u, v) in [(0.12, 0.18), (0.88, 0.18), (0.5, 0.45), (0.12, 0.72), (0.88, 0.72)] {
-            let p = CGPoint(x: bounds.width * u, y: bounds.height * v)
+            let p = CGPoint(x: bounds.width * u, y: canvasHeight * v)
             NSColor.systemBlue.setStroke()
             let circle = NSBezierPath(ovalIn: NSRect(x: p.x - 22, y: p.y - 22, width: 44, height: 44))
             circle.lineWidth = 2; circle.stroke()

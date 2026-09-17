@@ -3,63 +3,9 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0"
 let appSourceRevision = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "本地调试"
 
-final class PointerOutput {
-    var didPost: () -> Void = {}
-    var gesture = PointerGesture()
-    var lastPoint = CGPoint.zero
-    var mapping = Mapping(bounds: .zero)
-    var lastRelease = -Double.infinity
-    var lastClickPoint = CGPoint.zero
-    var clickCount: Int64 = 1
-    var downCount = 0
-    var upCount = 0
-    var moveCount = 0
-    var dragCount = 0
-    var lastWarpError: CGError = .success
-    let source = CGEventSource(stateID: .privateState)
-    func receive(_ sample: Sample) {
-        if let planned = gesture.consume(sample, mapping: mapping) {
-            let action = planned.action
-            let point = planned.point
-            if action == .down {
-                let nearby = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y) < 5
-                clickCount = nearby && ProcessInfo.processInfo.systemUptime - lastRelease < NSEvent.doubleClickInterval ? min(clickCount + 1, 3) : 1
-                lastClickPoint = point
-            }
-            send(action, at: point)
-        }
-    }
-    func release() {
-        if let planned = gesture.release() { send(planned.action, at: planned.point) }
-    }
-    private func send(_ action: PointerAction, at point: CGPoint) {
-        let type: CGEventType
-        switch action {
-        case .move: type = .mouseMoved
-        case .down: type = .leftMouseDown
-        case .drag: type = .leftMouseDragged
-        case .up: type = .leftMouseUp
-        }
-        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
-        // Position in the global desktop first, including when the cursor starts on another display.
-        // Warping does not itself generate a mouse event; the event below supplies that event.
-        lastWarpError = CGWarpMouseCursorPosition(point)
-        guard lastWarpError == .success || action == .up else { return }
-        event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
-        if action != .move { event.setIntegerValueField(.mouseEventClickState, value: clickCount) }
-        event.post(tap: .cghidEventTap)
-        didPost()
-        if action == .down { downCount += 1 }
-        if action == .up { upCount += 1 }
-        if action == .move { moveCount += 1 }
-        if action == .drag { dragCount += 1 }
-        lastPoint = point
-        if action == .up { lastRelease = ProcessInfo.processInfo.systemUptime }
-    }
-}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     let reader = HIDReader()
@@ -84,6 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var monitoring = UserDefaults.standard.bool(forKey: "testMonitoringEnabled")
     let monitoringToggle = NSButton(checkboxWithTitle: "开启测试监控与日志", target: nil, action: nil)
     let recordStateButton = NSButton(title: "记录当前状态", target: nil, action: nil)
+    let tabletToggle = NSButton(checkboxWithTitle: "实验：输出数位笔压力与倾斜（本次启动有效）", target: nil, action: nil)
+    let capturePicker = NSPopUpButton()
+    let captureButton = NSButton(title: "开始 30 秒笔报文采集", target: nil, action: nil)
+    let captureLabel = NativeLayout.text("尚未采集；每次选择一个操作，采集前后静置作对照。")
+    var captureActive = false
     var rateTestActive = false
     var window: NSWindow!
     var statusItem: NSStatusItem!
@@ -122,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         buildMenu()
         refreshScreens()
         reader.status = { [weak self] text in self?.statusLabel.stringValue = text; self?.testRecord.append(text) }
-        reader.disconnected = { [weak self] in self?.disable() }
+        reader.disconnected = { [weak self] in self?.finishPenCapture(reason: "设备断开"); self?.disable() }
         reader.sample = { [weak self] sample in
             guard let self else { return }
             self.latestSample = sample
@@ -172,12 +123,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
             NativeLayout.text("两种控制方式", heading: true),
             NativeLayout.text("未开启 · macOS 原生处理\nMiPad2Mac 不接管笔，系统仍可能响应笔的移动。根据本机测试，光标可能留在原来的屏幕，点击与笔尖位置不一定对应；本页的目标屏幕、旋转和翻转设置不会生效。暂停控制不等于禁用触控笔。"),
-            NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标、手指触控或绘画笔压输出。"),
+            NativeLayout.text("已开启 · MiPad2Mac 控制\n程序接管已识别的笔输入，将笔尖位置映射到所选屏幕，轻点转换为鼠标单击，按住移动转换为拖动；旋转和翻转设置生效。笔和触控板共用一个系统光标，不提供独立光标或手指触控；测试页可选择实验性数位笔输出，已在本机 Photoshop 2026 验证压感与倾斜，其他环境待验证。"),
             NativeLayout.text("关闭窗口后的行为可在“设置”中选择；默认留在菜单栏继续控制。暂停或退出后恢复系统原生处理，视频显示不受影响。")
         ])
         monitoringToggle.target = self; monitoringToggle.action = #selector(monitoringChanged)
         monitoringToggle.state = monitoring ? .on : .off
         recordStateButton.target = self; recordStateButton.action = #selector(recordTestState)
+        tabletToggle.target = self; tabletToggle.action = #selector(tabletModeChanged)
+        capturePicker.addItems(withTitles: ["轻压与重压", "左右与前后倾斜", "捏笔杆", "双击笔杆", "滑动笔杆", "静置与普通落笔对照"])
+        captureButton.target = self; captureButton.action = #selector(startPenCapture)
         let testPage = NativeLayout.page([
             monitoringToggle,
             NativeLayout.text("关闭后停止测试状态刷新、报文快照、速率测量和新增日志；已有日志仍可导出。正常笔控制所需的 HID 读取会继续，不受此开关影响。"),
@@ -187,6 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             NativeLayout.text("控制输出", heading: true), controlLabel,
             NativeLayout.text("笔输入状态", heading: true), countsLabel, packetLabel, sampleLabel,
             rateTestButton, rateTestLabel,
+            NativeLayout.text("压力、倾斜与虚拟按键", heading: true),
+            tabletToggle,
+            NativeLayout.text("实验输出使用公开数位笔事件字段；已在本机 Photoshop 2026 验证压感与倾斜；其他环境待验证。切换会暂停控制，需回控制页重新启用。关闭可恢复普通鼠标输出；虚拟按键不映射任何操作。"),
+            capturePicker, captureButton, captureLabel,
+            NativeLayout.text("仅在测试监控开启时采集已打开的笔接口，保留解析前原始报文、时间及变化位。每次最多 30 秒、12000 条、2 MiB，超限计数。导出包含最近一次采集；新采集会替换上一段原始数据。"),
             NativeLayout.text("测试与调试记录", heading: true),
             NativeLayout.text("记录连接状态、速率测试结果及测试窗口收到的按下/抬起。最多保留 200 条，仅在内存保存；可手动记录当前状态、导出或清空。不是完整 USB 抓包，也不记录键盘输入。"),
             NativeLayout.row([recordStateButton, NSButton(title: "导出记录…", target: self, action: #selector(exportTestRecord)), NSButton(title: "清空记录", target: self, action: #selector(clearTestRecord))]),
@@ -309,11 +268,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         testRecord.enabled = monitoring; reader.diagnosticsEnabled = monitoring
         rateTestButton.isEnabled = monitoring && !rateTestActive
         recordStateButton.isEnabled = monitoring
+        captureButton.isEnabled = monitoring && !captureActive
         rateTime = ProcessInfo.processInfo.systemUptime; rateReports = reader.reports
         rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
         if monitoring { testRecord.append("测试监控已开启") }
         else {
             reader.measurement = nil; rateTestActive = false
+            finishPenCapture(reason: "监控关闭")
             controlLabel.stringValue = "测试监控已关闭"
             countsLabel.stringValue = "输入状态未刷新"
             packetLabel.stringValue = "报文快照已关闭"
@@ -325,7 +286,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard monitoring else { return }
         testRecord.append("控制：\(enabled ? "已开启" : "未开启") · \(screenPicker.titleOfSelectedItem ?? "未选择屏幕")\n\(permissionsLabel.stringValue)\n\(countsLabel.stringValue)\n\(sampleLabel.stringValue)\n\(packetLabel.stringValue)")
     }
-    @objc func exportTestRecord() { testRecord.save(in: window) }
+    @objc func exportTestRecord() { testRecord.save(in: window, extra: reader.penCapture?.export ?? "") }
+    @objc func tabletModeChanged() {
+        pause()
+        output.tabletEnabled = tabletToggle.state == .on
+        testRecord.append("数位笔实验输出：\(output.tabletEnabled ? "开启" : "关闭")；控制已暂停，需重新启用。")
+    }
+    @objc func startPenCapture() {
+        guard monitoring, !captureActive, reader.deviceCount == 1 else { return }
+        reader.penCapture = PenCapture(start: ProcessInfo.processInfo.systemUptime, label: capturePicker.titleOfSelectedItem ?? "笔测试")
+        captureActive = true; captureButton.isEnabled = false
+        captureLabel.stringValue = "采集中：前 5 秒静置，中间 20 秒操作，最后 5 秒静置。"
+        testRecord.append("开始笔接口采集：\(capturePicker.titleOfSelectedItem ?? "")；\(Date())")
+    }
+    func finishPenCapture(reason: String) {
+        guard captureActive, let capture = reader.penCapture else { return }
+        capture.stop(); captureActive = false; captureButton.isEnabled = monitoring
+        captureLabel.stringValue = "\(reason) · \(capture.summary)"
+        testRecord.append(captureLabel.stringValue)
+    }
     @objc func clearTestRecord() { testRecord.clear() }
     @objc func startRateTest() {
         guard monitoring else { return }
@@ -347,6 +326,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         testRecord.append(rateTestLabel.stringValue)
     }
     func refreshStats() {
+        if captureActive, let capture = reader.penCapture {
+            let remaining = capture.start + capture.duration - ProcessInfo.processInfo.systemUptime
+            if remaining <= 0 { finishPenCapture(reason: "采集完成") }
+            else { captureLabel.stringValue = "剩余 \(Int(ceil(remaining))) 秒 · \(capture.summary)" }
+        }
         if monitoring { updateRateTest() }
         if ProcessInfo.processInfo.systemUptime - permissionCheckedAt >= 2 {
             accessibilityAllowed = AXIsProcessTrusted()
@@ -378,6 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let sample = latestSample {
             sampleLabel.stringValue = String(format: "X %.3f · Y %.3f · 接触 %@ · 范围内 %@ · 压感 %d",
                 sample.x, sample.y, sample.touching ? "是" : "否", sample.inRange ? "是" : "否", sample.pressure)
+            sampleLabel.stringValue += "\n倾斜 X \(sample.tiltX)° / Y \(sample.tiltY)° · barrel \(sample.barrel) · eraser \(sample.eraser) · 有效位置 \(sample.positionValid)\n实验数位笔输出 \(output.tabletEnabled ? "开" : "关") · 接近/离开提交 \(output.proximityCount)"
         }
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
@@ -480,7 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func mappingChanged() { pause() }
     @objc func displayChanged() { disable(); refreshScreens() }
     @objc func reconnect() {
-        disable(); reader.stop(); reader.resetDiagnostics()
+        finishPenCapture(reason: "重新连接"); disable(); reader.stop(); reader.resetDiagnostics()
         rateTime = ProcessInfo.processInfo.systemUptime; rateReports = 0
         rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
         latestSample = nil; sampleLabel.stringValue = "尚未收到坐标"

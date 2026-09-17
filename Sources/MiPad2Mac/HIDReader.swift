@@ -10,6 +10,7 @@ final class HIDReader {
     var disconnected: () -> Void = {}
     var diagnosticsEnabled = false
     var measurement: InputRateMeasurement?
+    var penCapture: PenCapture?
     var reports = 0
     var decoded = 0
     private var lastBytes: [UInt8] = []
@@ -44,7 +45,7 @@ final class HIDReader {
         manager = IOHIDManagerCreate(kCFAllocatorDefault, IOHIDManagerOptions.independentDevices.rawValue)
         // Match only Xiaomi's digitizer. Never open its keyboard collection or the Mac keyboard.
         let match: [String: Any] = [kIOHIDVendorIDKey: 0x2717, kIOHIDProductIDKey: 0x2d05,
-                                  kIOHIDPrimaryUsagePageKey: 0x0d]
+                                  kIOHIDPrimaryUsagePageKey: 0x0d, kIOHIDPrimaryUsageKey: 0x02]
         IOHIDManagerSetDeviceMatching(manager, match as CFDictionary)
         let context = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, _, _, device in
@@ -94,6 +95,9 @@ final class HIDReader {
                 d.reader.lastReportID = reportID
             }
             let decoded = d.supported ? XiaomiDigitizer.decode(data, reportID: reportID) : nil
+            if d.reader.diagnosticsEnabled {
+                d.reader.penCapture?.receive(at: ProcessInfo.processInfo.systemUptime, reportID: reportID, bytes: data, sample: decoded)
+            }
             d.reader.measurement?.receive(at: ProcessInfo.processInfo.systemUptime, sample: decoded)
             guard let sample = decoded else { return }
             d.reader.decoded += 1

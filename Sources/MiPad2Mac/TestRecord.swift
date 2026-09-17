@@ -28,10 +28,10 @@ final class TestRecord {
         text.scrollToEndOfDocument(nil)
     }
     func clear() { lines.removeAll(); text.string = "" }
-    func save(in window: NSWindow) {
+    func save(in window: NSWindow, extra: String = "") {
         let panel = NSSavePanel(); panel.nameFieldStringValue = "MiPad2Mac-test.txt"
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        let content = "MiPad2Mac \(appVersion) · 测试记录\n" + lines.joined(separator: "\n") + "\n"
+        let content = "MiPad2Mac \(appVersion) · 摘要 \(appSourceRevision) · 测试记录\n" + lines.joined(separator: "\n") + "\n" + extra
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
             do { try content.write(to: url, atomically: true, encoding: .utf8) }

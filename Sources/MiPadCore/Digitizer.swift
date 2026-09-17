@@ -18,7 +18,7 @@ public enum XiaomiDigitizer {
         let pressure = Int(bytes[6]) | Int(bytes[7]) << 8
         let tiltX = Int(Int8(bitPattern: bytes[8]))
         let tiltY = Int(Int8(bitPattern: bytes[9]))
-        guard x <= 32767, y <= 32767, pressure <= 8191,
+        guard flags & 0xf0 == 0, x <= 32767, y <= 32767, pressure <= 8191,
               abs(tiltX) <= 60, abs(tiltY) <= 60 else { return nil }
         return Sample(x: Double(x) / 32767, y: Double(y) / 32767,
                       touching: flags & 1 != 0, inRange: flags & 8 != 0,
@@ -88,14 +88,14 @@ public struct PointerGesture {
     private var lastPoint = CGPoint.zero
     private var dragging = false
     public init() {}
-    public mutating func consume(_ sample: Sample, mapping: Mapping) -> PointerEvent? {
+    public mutating func consume(_ sample: Sample, mapping: Mapping, drawing: Bool = false) -> PointerEvent? {
         guard let action = state.consume(sample) else { return nil }
         let point = mapping.point(x: sample.x, y: sample.y)
         switch action {
         case .down:
             pressPoint = point; lastPoint = point; dragging = false
         case .drag:
-            if !dragging && hypot(point.x - pressPoint.x, point.y - pressPoint.y) < 4 { return nil }
+            if !drawing && !dragging && hypot(point.x - pressPoint.x, point.y - pressPoint.y) < 4 { return nil }
             dragging = true; lastPoint = point
         case .up:
             // Even an in-range lift can have reset coordinates. Release where we last pressed/dragged.
