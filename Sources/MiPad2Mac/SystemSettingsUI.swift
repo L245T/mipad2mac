@@ -100,6 +100,10 @@ struct SettingsDetail: View {
             .background(Color(nsColor: .textBackgroundColor)).textSelection(.enabled)
             .controlSize(.regular).toggleStyle(SettingsToggleStyle()).labeledContentStyle(SettingsValueStyle())
     }
+    private func settingDescription(_ text: String) -> some View {
+        Text(text).font(.callout).foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+    }
     private func footerNote(_ text: String) -> some View {
         Text(text).font(.footnote).foregroundStyle(.secondary)
             .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
@@ -138,7 +142,7 @@ struct SettingsDetail: View {
             } header: { Text("显示器") } footer: { footerNote("修改映射会结束当前笔画，处理方式保持不变。显示的是逻辑分辨率。") }
             SettingsSection("笔输入") {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
-                    Text("压力与倾斜"); Text("向支持的绘画软件发送笔压与倾斜数据。")
+                    Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
                 }.accessibilityLabel("压力与倾斜")
                 LabeledContent("虚拟按键") { Text("暂不支持").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
             }
@@ -163,7 +167,7 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.monitoring }, set: { value in model.act { app.monitoringToggle.state = value ? .on : .off; app.monitoringChanged() } })) {
-                    Text("测试监控与日志"); Text("关闭不影响正常笔控制，已有记录仍可导出。")
+                    Text("测试监控与日志"); settingDescription("关闭不影响正常笔控制，已有记录仍可导出。")
                 }.accessibilityLabel("测试监控与日志")
                 LabeledContent("定位、轻点与拖动") { Button("打开测试页") { app.showTestWindow() } }
             }
@@ -195,7 +199,7 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.settingsPage.materialToggle.state == .on }, set: { value in model.act { app.settingsPage.materialToggle.state = value ? .on : .off; app.settingsPage.materialChanged() } })) {
-                    Text("透明侧栏"); Text("采用系统材质，遵循降低透明度设置。")
+                    Text("透明侧栏"); settingDescription("采用系统材质，遵循降低透明度设置。")
                 }.accessibilityLabel("透明侧栏")
                 SettingsPicker("关闭窗口时", selection: Binding(get: { app.settingsPage.closePicker.indexOfSelectedItem }, set: { value in model.act { app.settingsPage.closePicker.selectItem(at: value); app.settingsPage.closeChanged() } })) {
                     Text("留在菜单栏").tag(0); Text("保留 Dock 图标").tag(1); Text("退出软件").tag(2)

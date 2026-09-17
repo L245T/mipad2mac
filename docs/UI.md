@@ -12,6 +12,13 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 - 状态和选中颜色使用系统语义颜色；分组底色按参考图校准为浅色白度 0.965 / 深色 0.18，并提供增强对比度变体。授权和运行状态同时保留文字，不只依赖颜色表达。原生处理状态为红色建议；只有已启用才显示绿色，等待或失败为橙色。状态旁问号展开当前处理方式的说明，并提供独立的无障碍名称。
 - 原生侧栏材质可在设置中关闭；尊重系统降低透明度偏好。不保证私有系统设置页面的逐像素复刻。
 
+## 说明文字层级
+
+- 设置项名称沿用系统正文字体与主要文字颜色；名称下的补充说明统一使用 callout 和 secondary 语义颜色，左对齐、间隔 3 pt，自然换行，不固定行数。
+- 同一规则用于透明侧栏、压力与倾斜、测试监控等两行设置项；组外说明仍使用 footnote。错误与操作前提不降为装饰性说明。
+- 根据 Apple 的 Typography 和 Labels 指南区分信息层级，避免通过调低整个控件透明度处理说明文字；保留深色模式的语义颜色适配。
+- 应用包声明 zh-Hans 本地化，原生右键菜单与保存面板由 macOS 提供中文文案，不修改用户系统语言。
+
 ## 行为约束
 
 展示层复用既有控制和权限操作。测试监控关闭时停止诊断刷新与新增日志，不停止正常笔输入读取。界面刷新复用已有低频定时器，高频 HID 报文不直接驱动界面重绘。
@@ -35,6 +42,9 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 已在 macOS 27 检查五个页面、侧栏激活高亮以及滚动到底部时的标题裁切、监控开关、压力与倾斜开关、侧栏导航和关于页代码摘要。深色及辅助功能对比度完整矩阵、其他 macOS 版本仍待验证。UI 构建和自动化测试不代替平板输入与 Photoshop 端到端验收。
 
 ## 官方参考
+
+- [Typography](https://developer.apple.com/design/human-interface-guidelines/typography)
+- [Labels](https://developer.apple.com/design/human-interface-guidelines/labels)
 
 - [Window content layout](https://developer.apple.com/documentation/appkit/nswindow/contentlayoutguide)
 - [Color](https://developer.apple.com/design/human-interface-guidelines/color)
