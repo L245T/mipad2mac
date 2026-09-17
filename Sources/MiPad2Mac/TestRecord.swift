@@ -31,7 +31,8 @@ final class TestRecord {
     }
     func clear() { lines.removeAll(); text.string = "" }
     func save(in window: NSWindow, extra: String = "") {
-        let panel = NSSavePanel(); panel.nameFieldStringValue = "MiPad2Mac-test.txt"
+        let panel = NSSavePanel(); panel.title = "导出测试记录"; panel.prompt = "导出"
+        panel.nameFieldLabel = "文件名称："; panel.nameFieldStringValue = "MiPad2Mac-test.txt"
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         let content = "MiPad2Mac \(appVersion) · 摘要 \(appSourceRevision) · 测试记录\n" + lines.joined(separator: "\n") + "\n" + extra
         panel.beginSheetModal(for: window) { response in

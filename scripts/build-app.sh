@@ -19,6 +19,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>org.mipad2mac.app</string>
+<key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
+<key>CFBundleLocalizations</key><array><string>zh-Hans</string></array>
 <key>CFBundleName</key><string>MiPad2Mac</string>
 <key>CFBundleExecutable</key><string>MiPad2Mac</string>
 <key>CFBundleIconFile</key><string>MiPad2Mac.icns</string>
