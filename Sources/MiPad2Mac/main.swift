@@ -4,10 +4,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.0"
-let appGitRevision = Bundle.main.object(forInfoDictionaryKey: "MiPadGitRevision") as? String ?? ""
-let appGitRevisionLabel = appGitRevision.isEmpty ? "未关联（本地测试）" : String(appGitRevision.prefix(7))
-let appSourceRevision = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "本地调试"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5.0"
 
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {

@@ -2,6 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Build the app before packaging.
+# Beta filenames require matching inputs and the current public master on GitHub.
+BETA_REVISION=""
+if [[ "${MIPAD_BETA:-0}" == "1" ]]; then
+    export MIPAD_REQUIRE_GIT_REVISION=1
+    BETA_REVISION="$(python3 scripts/build-revision.py)"
+    REMOTE_REVISION="$(git ls-remote https://github.com/L245T/mipad2mac.git refs/heads/master | cut -f1)"
+    [[ "$BETA_REVISION" == "$REMOTE_REVISION" ]] || { echo "Public master does not match; refusing Beta filename." >&2; exit 1; }
+fi
 bash scripts/build-app.sh
 APP="$PWD/dist/MiPad2Mac.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
@@ -23,7 +31,17 @@ MiPad2Mac 安装说明
 TEXT
 hdiutil create -volname "MiPad2Mac $VERSION" -srcfolder "$WORK/content" -format UDZO -ov "$WORK/package.dmg"
 hdiutil verify "$WORK/package.dmg"
-DEST="$PWD/dist/MiPad2Mac-$VERSION.dmg"
+PACKAGE_VERSION="$VERSION"
+if [[ "${MIPAD_BETA:-0}" == "1" ]]; then
+    [[ "$BETA_REVISION" == "$(python3 scripts/build-revision.py)" ]] || { echo "Inputs changed during packaging." >&2; exit 1; }
+    SHORT_REVISION="$(git -C "${MIPAD_REVISION_REPO:-$PWD}" rev-parse --short=7 "$BETA_REVISION")"
+    if [[ "$VERSION" == *-beta* ]]; then
+        PACKAGE_VERSION="$VERSION.$SHORT_REVISION"
+    else
+        PACKAGE_VERSION="$VERSION-beta.$SHORT_REVISION"
+    fi
+fi
+DEST="$PWD/dist/MiPad2Mac-$PACKAGE_VERSION.dmg"
 mv "$WORK/package.dmg" "$DEST"
-(cd "$PWD/dist" && shasum -a 256 "MiPad2Mac-$VERSION.dmg") > "$DEST.sha256"
+(cd "$PWD/dist" && shasum -a 256 "MiPad2Mac-$PACKAGE_VERSION.dmg") > "$DEST.sha256"
 printf '%s\n' "$DEST"

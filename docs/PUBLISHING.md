@@ -31,28 +31,28 @@ python3 scripts/export-source.py /tmp/mipad2mac-public-source
 
 日常修改和本地构建不自动提升数字版本或构建号。提交推送、升版、打标签和创建 Release 是分别授权的操作；用户要求“推送但不升版本”时，只提交推送审核后的修改。源码推送不代表安装包已发布。
 
-关于页同时显示提交编号与内容校验，含义见下节。仅修改文档不触发构建。赞助原图位于 `assets/sponsor/`，README 与应用共用，不重绘二维码。
+App 只显示应用版本号，不嵌入源码摘要或 Git 提交编号。仅修改文档不触发构建。赞助原图位于 `assets/sponsor/`，README 与应用共用，不重绘二维码。
 
 ## 构建标识
 
-- **提交编号**：`MiPadGitRevision` 保存完整 Git commit SHA，关于页显示前 7 位，悬停可查看完整值，日志导出保留完整值。与该次构建所关联的 GitHub 提交相同，不等于仓库此后新增的最新提交。
-- **内容校验**：`MiPadSourceRevision` 保留 `scripts/source-revision.py` 计算的 SHA-256 前 12 位。范围是 Package.swift、Sources 下全部 Swift 文件、当前 v8 PNG 图标及 sponsor 资源；不含 Git 历史、文档、测试、构建脚本和二进制。它与提交编号不是同一种哈希。
-- `scripts/build-revision.py` 默认检查当前仓库，也可用 `MIPAD_REVISION_REPO` 指定公开参考仓库。参考仓库 origin 必须是本项目 GitHub 地址且工作区干净；脚本逐项比对实际打包输入与其 HEAD 已提交内容及文件清单。未匹配时普通构建显示本地测试；设置 `MIPAD_REQUIRE_GIT_REVISION=1` 则直接失败。
-- 此校验关联的是应用源码和图片输入，不保证不同工具链、依赖或打包环境产出相同二进制，也不证明提交已上传。上传状态须另用 Git 远端核对。
+App 保留 `CFBundleShortVersionString` 与原生数字构建号 `CFBundleVersion`，不写入 `MiPadSourceRevision` / `MiPadGitRevision`，关于页和日志不展示这两种摘要。
 
-最终构建顺序：测试通过 → 提交源码 → 正常推送并核对远端 → 构建。直接在干净的公开仓库可执行：
+`scripts/source-revision.py` 与 `scripts/build-revision.py` 只作包外校验。前者计算 Package.swift、Swift 源码及应用图片的内容摘要；后者逐项比较实际输入和干净的公开参考仓库 HEAD。二者均不是二进制可复现性证明，也不能单独证明提交已经推送。
 
-```sh
-MIPAD_REQUIRE_GIT_REVISION=1 bash scripts/build-app.sh
-```
-
-开发仓库与公开历史分离时，指定经过审查并已推送的参考 checkout：
+正式发布顺序：测试 → 本地提交 → 审查同步公开仓库并提交推送 → 核对远端及打包输入 → 构建 App 和 DMG → 验证后创建正式 Release。开发与公开历史分离时：
 
 ```sh
-MIPAD_REVISION_REPO=/path/to/public-checkout MIPAD_REQUIRE_GIT_REVISION=1 bash scripts/build-app.sh
+MIPAD_REVISION_REPO=/path/to/public-checkout MIPAD_REQUIRE_GIT_REVISION=1 bash scripts/build-dmg.sh
 ```
 
-编号只在打包时注入 Info.plist，不写回 Swift 源码，因此不会出现“提交编号写入后又生成另一个提交”的循环。构建末尾重新检查输入和参考编号，变化时拒绝替换应用。构建前后禁止其他窗口修改同一源码；校验不能代替工作区互斥。数字版本与构建号不因注入编号而增加。
+正式 DMG 命名为 `MiPad2Mac-<应用版本>.dmg`。需要制作 Beta 包时，在上述命令中增加 `MIPAD_BETA=1`；脚本要求输入匹配公开参考提交，且提交与 GitHub master 一致，然后使用至少 7 位公开短 SHA：
+
+- 普通应用版本：`MiPad2Mac-0.5.0-beta.<公开短SHA>.dmg`。
+- 已有 Beta 后缀：`MiPad2Mac-0.5.0-beta.1.<公开短SHA>.dmg`，不重复添加 beta。
+
+校验文件为同名 `.dmg.sha256`，内容只含 SHA-256 和 DMG 文件名。短 SHA 取自公开提交，不取开发 main 或源码内容摘要。Beta 文件名不改变 App 版本和更新比较语义；若需要 Beta 迭代更新提醒，App 版本与 Release 标签仍须使用匹配的预发布版本号。
+
+构建前后会重新核对输入，校验不替代共享写入互斥。发布版本、标签和附件需要明确授权；日常功能同步不自动发布 Release。
 
 ## 文档同步检查
 

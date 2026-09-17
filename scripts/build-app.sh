@@ -26,19 +26,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>MiPad2Mac</string>
 <key>CFBundleIconFile</key><string>MiPad2Mac.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.4.0</string>
-<key>CFBundleVersion</key><string>21</string>
+<key>CFBundleShortVersionString</key><string>0.5.0</string>
+<key>CFBundleVersion</key><string>22</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-/usr/libexec/PlistBuddy -c "Add :MiPadSourceRevision string $SOURCE_REVISION" "$APP/Contents/Info.plist"
 # Check again in case another process changed build inputs.
 [[ "$SOURCE_REVISION" == "$(python3 scripts/source-revision.py)" ]] || { echo "Source changed during build; refusing package." >&2; exit 1; }
 [[ "$GIT_REVISION" == "$(python3 scripts/build-revision.py)" ]] || { echo "Reference changed during build; refusing package." >&2; exit 1; }
-if [[ -n "$GIT_REVISION" ]]; then
-    /usr/libexec/PlistBuddy -c "Add :MiPadGitRevision string $GIT_REVISION" "$APP/Contents/Info.plist"
-fi
 # Replace the app only after the build and resource packaging succeed.
 DEST="$PWD/dist/MiPad2Mac.app"
 if [[ -d "$DEST" ]]; then
