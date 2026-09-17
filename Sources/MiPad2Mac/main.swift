@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         buildMenu()
         refreshScreens()
         reader.status = { [weak self] text in self?.statusLabel.stringValue = text; self?.testRecord.append(text) }
-        reader.disconnected = { [weak self] in self?.finishPenCapture(reason: "设备断开"); self?.connection.disconnected(); self?.automaticNotificationPending = false; self?.disable() }
+        reader.disconnected = { [weak self] in self?.finishPenCapture(reason: "设备断开"); self?.connection.disconnected(); self?.automaticNotificationPending = false; self?.disable(); self?.output.resetConnection() }
         reader.devicesChanged = { [weak self] in self?.connectionChanged() }
         reader.sample = { [weak self] sample in
             guard let self else { return }
@@ -239,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         recordStateButton.isEnabled = monitoring
         captureButton.isEnabled = monitoring && !captureActive
         rateTime = ProcessInfo.processInfo.systemUptime; rateReports = reader.reports
-        rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
+        rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount + output.rightEventCount
         if monitoring { testRecord.append("测试监控已开启") }
         else {
             reader.measurement = nil; rateTestActive = false
@@ -325,11 +325,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         countsLabel.stringValue = "已打开接口：\(reader.deviceCount) · 收到报文：\(reader.reports) · 解析成功：\(reader.decoded)"
         let now = ProcessInfo.processInfo.systemUptime
         let elapsed = max(0.001, now - rateTime)
-        let totalOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
+        let totalOutput = output.downCount + output.upCount + output.moveCount + output.dragCount + output.rightEventCount
         countsLabel.stringValue += String(format: "\n实时速率（只读）：接收 %.0f 报文/秒 · 提交 %.0f 事件/秒 · 重置报文 %d", Double(reader.reports - rateReports) / elapsed, Double(totalOutput - rateOutput) / elapsed, reader.resetReports)
         rateTime = now; rateReports = reader.reports; rateOutput = totalOutput
         controlLabel.stringValue = enabled
-            ? "控制已启用 · 已提交按下/抬起：\(output.downCount)/\(output.upCount) · 移动/拖动：\(output.moveCount)/\(output.dragCount)\n定位调用：\(output.lastWarpError == .success ? "成功（待测试页验收）" : "失败")"
+            ? "控制已启用 · 已提交按下/抬起：\(output.downCount)/\(output.upCount) · 移动/拖动：\(output.moveCount)/\(output.dragCount) · 右键：\(output.rightClickCount)\n定位调用：\(output.lastWarpError == .success ? "成功（待测试页验收）" : "失败")"
             : "MiPad2Mac 控制未启用：目标屏幕映射不生效，macOS 仍可能响应触控笔。"
         controlLabel.textColor = enabled ? .systemGreen : .systemOrange
         if enabled, let cursor = CGEvent(source: nil)?.location {
@@ -500,7 +500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func reconnect() {
         finishPenCapture(reason: "重新连接"); disable(); reader.stop(); reader.resetDiagnostics()
         rateTime = ProcessInfo.processInfo.systemUptime; rateReports = 0
-        rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount
+        rateOutput = output.downCount + output.upCount + output.moveCount + output.dragCount + output.rightEventCount
         latestSample = nil; sampleLabel.stringValue = "尚未收到坐标"
         automaticControl.request()
         reader.start()

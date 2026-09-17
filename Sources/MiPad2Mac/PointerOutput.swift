@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import MiPadCore
+import UniformTypeIdentifiers
 
 final class PointerOutput {
     // Experimental event-stream identity only; this does not register an OS tablet driver.
@@ -11,7 +12,98 @@ final class PointerOutput {
     private var currentSample: Sample?
     var proximityCount = 0
     var didPost: () -> Void = {}
-    var gesture = PointerGesture()
+    private var gesture = LongPressGesture()
+    let longPress = LongPressPreferences()
+    private var longPressTimer: Timer?
+    private var applicationObserver: NSObjectProtocol?
+    private var candidateTarget: pid_t?
+    private var candidateFrontmost: pid_t?
+    private var contactSample: Sample?
+    private var deferredContact = false
+    private var pressLocation = CGPoint.zero
+    private var postedLeft = false
+    private var postedRight = false
+    var rightClickCount = 0
+    var rightEventCount = 0
+
+    init() {
+        applicationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.gesture.isPending else { return }
+            self.release()
+        }
+    }
+    deinit {
+        longPressTimer?.invalidate()
+        if let applicationObserver { NSWorkspace.shared.notificationCenter.removeObserver(applicationObserver) }
+    }
+    // AX hit testing identifies the application under the pen, including inactive windows.
+    // Unknown targets take the immediate path; never guess that they are safe to defer.
+    private func target(at point: CGPoint) -> NSRunningApplication? {
+        var element: AXUIElement?
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.05)
+        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success,
+              let element else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
+        return NSRunningApplication(processIdentifier: pid)
+    }
+    func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
+        release(); edit(longPress)
+    }
+    func addExcludedApplication() {
+        release()
+        let panel = NSOpenPanel()
+        panel.title = "选择不使用长按右键的绘画应用"
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let url = panel.url,
+              let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return }
+        changeLongPress { settings in
+            var apps = settings.exclusions
+            apps[id] = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+                ?? url.deletingPathExtension().lastPathComponent
+            settings.exclusions = apps
+        }
+    }
+    func resetConnection() { release(); gesture.reset() }
+    private func scheduleLongPress() {
+        guard longPressTimer == nil, let deadline = gesture.deadline else { return }
+        let timer = Timer(timeInterval: max(0.001, deadline - ProcessInfo.processInfo.systemUptime), repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.longPressTimer = nil
+            guard self.gesture.isPending else { return }
+            guard let candidateTarget = self.candidateTarget,
+                  self.target(at: self.pressLocation)?.processIdentifier == candidateTarget,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == self.candidateFrontmost else {
+                self.release(); return
+            }
+            self.emit(self.gesture.fire(now: ProcessInfo.processInfo.systemUptime))
+            if self.gesture.isPending { self.scheduleLongPress() }
+        }
+        longPressTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+    private func emit(_ events: [PointerEvent]) {
+        for planned in events {
+            if planned.action == .down {
+                let nearby = hypot(planned.point.x - lastClickPoint.x, planned.point.y - lastClickPoint.y) < 5
+                clickCount = nearby && ProcessInfo.processInfo.systemUptime - lastRelease < NSEvent.doubleClickInterval ? min(clickCount + 1, 3) : 1
+                lastClickPoint = planned.point
+            }
+            if !send(planned.action, at: planned.point) {
+                // Release only buttons we actually submitted and suppress this contact after a failed post setup.
+                _ = gesture.cancel()
+                if postedLeft { _ = send(.up, at: lastPoint) }
+                if postedRight { _ = send(.rightUp, at: lastPoint) }
+                break
+            }
+        }
+    }
     var lastPoint = CGPoint.zero
     private var lastTabletPoint = CGPoint.zero
     var mapping = Mapping(bounds: .zero)
@@ -29,24 +121,36 @@ final class PointerOutput {
         if tabletEnabled && sample.inRange && sample.positionValid && !sample.eraser && !inProximity {
             sendProximity(true, at: mapping.point(x: sample.x, y: sample.y))
         }
-        if let planned = gesture.consume(sample, mapping: mapping, drawing: tabletEnabled) {
-            let action = planned.action
-            let point = planned.point
-            if action == .down {
-                let nearby = hypot(point.x - lastClickPoint.x, point.y - lastClickPoint.y) < 5
-                clickCount = nearby && ProcessInfo.processInfo.systemUptime - lastRelease < NSEvent.doubleClickInterval ? min(clickCount + 1, 3) : 1
-                lastClickPoint = point
-            }
-            send(action, at: point)
+        let contact = sample.touching && sample.inRange && !sample.eraser
+        if gesture.isIdle && contact && sample.positionValid {
+            pressLocation = mapping.point(x: sample.x, y: sample.y)
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            let frontmostExcluded = frontmost?.bundleIdentifier.map { longPress.excludes($0) } ?? false
+            let targetApp = longPress.enabled && !frontmostExcluded ? target(at: pressLocation) : nil
+            candidateTarget = targetApp?.processIdentifier
+            candidateFrontmost = frontmost?.processIdentifier
+            deferredContact = longPress.enabled && !frontmostExcluded
+                && (targetApp?.bundleIdentifier.map { !longPress.excludes($0) } ?? false)
         }
+        if contact { contactSample = sample }
+        // A deferred tap is emitted on lift; retain the last actual contact's tablet fields.
+        if !contact && gesture.isPending { currentSample = contactSample }
+        emit(gesture.consume(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
+                             enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled))
+        if gesture.isPending { scheduleLongPress() }
+        else { longPressTimer?.invalidate(); longPressTimer = nil }
+        if !contact { contactSample = nil }
         if tabletEnabled && (!sample.inRange || !sample.positionValid || sample.eraser) && inProximity {
             sendProximity(false, at: lastPoint)
         }
     }
     func release() {
-        if let planned = gesture.release() { send(planned.action, at: planned.point) }
+        longPressTimer?.invalidate(); longPressTimer = nil
+        emit(gesture.cancel())
+        if postedLeft { _ = send(.up, at: lastPoint) }
+        if postedRight { _ = send(.rightUp, at: lastPoint) }
         if inProximity { sendProximity(false, at: lastPoint) }
-        currentSample = nil
+        currentSample = nil; contactSample = nil
     }
     private func sendProximity(_ entering: Bool, at point: CGPoint) {
         guard let event = CGEvent(source: source) else { return }
@@ -64,26 +168,29 @@ final class PointerOutput {
         event.post(tap: .cghidEventTap)
         inProximity = entering; proximityCount += 1
     }
-    private func send(_ action: PointerAction, at point: CGPoint) {
+    @discardableResult private func send(_ action: PointerAction, at point: CGPoint) -> Bool {
         let type: CGEventType
         switch action {
         case .move: type = .mouseMoved
         case .down: type = .leftMouseDown
         case .drag: type = .leftMouseDragged
         case .up: type = .leftMouseUp
+        case .rightDown: type = .rightMouseDown
+        case .rightUp: type = .rightMouseUp
         }
-        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
+        let right = action == .rightDown || action == .rightUp
+        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: right ? .right : .left) else { return false }
         // Position in the global desktop first, including when the cursor starts on another display.
         // Warping does not itself generate a mouse event; the event below supplies that event.
         lastWarpError = CGWarpMouseCursorPosition(point)
-        guard lastWarpError == .success || action == .up else { return }
+        guard lastWarpError == .success || action == .up || action == .rightUp else { return false }
         event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
-        if action != .move { event.setIntegerValueField(.mouseEventClickState, value: clickCount) }
-        if tabletEnabled {
+        if action != .move { event.setIntegerValueField(.mouseEventClickState, value: right ? 1 : clickCount) }
+        if tabletEnabled && !right {
             event.setIntegerValueField(.mouseEventSubtype, value: Int64(CGEventMouseSubtype.tabletPoint.rawValue))
             event.setIntegerValueField(.tabletEventDeviceID, value: tabletID)
             let contact = action == .down || action == .drag
-            let pressure = contact ? Double(currentSample?.pressure ?? 0) / 8191 : 0
+            let pressure = contact ? Double(contactSample?.pressure ?? currentSample?.pressure ?? 0) / 8191 : 0
             let tilt = mapping.tilt(x: currentSample?.tiltX ?? 0, y: currentSample?.tiltY ?? 0)
             event.setDoubleValueField(.mouseEventPressure, value: pressure)
             event.setDoubleValueField(.tabletEventPointPressure, value: pressure)
@@ -103,11 +210,15 @@ final class PointerOutput {
         }
         event.post(tap: .cghidEventTap)
         didPost()
-        if action == .down { downCount += 1 }
-        if action == .up { upCount += 1 }
+        if action == .down { downCount += 1; postedLeft = true }
+        if action == .up { upCount += 1; postedLeft = false }
+        if right { rightEventCount += 1 }
+        if action == .rightDown { postedRight = true }
+        if action == .rightUp { postedRight = false; rightClickCount += 1; lastRelease = -Double.infinity }
         if action == .move { moveCount += 1 }
         if action == .drag { dragCount += 1 }
         lastPoint = point
         if action == .up { lastRelease = ProcessInfo.processInfo.systemUptime }
+        return true
     }
 }

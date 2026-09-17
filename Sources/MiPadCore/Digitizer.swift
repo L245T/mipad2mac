@@ -73,11 +73,12 @@ public struct Mapping {
     }
 }
 
-public enum PointerAction: Equatable { case move, down, drag, up }
+public enum PointerAction: Equatable { case move, down, drag, up, rightDown, rightUp }
 
 public struct PointerEvent: Equatable {
     public let action: PointerAction
     public let point: CGPoint
+    public init(action: PointerAction, point: CGPoint) { self.action = action; self.point = point }
 }
 
 /// Keep a tap at its press point until movement exceeds a small logical-point threshold.
@@ -100,6 +101,8 @@ public struct PointerGesture {
         case .up:
             // Even an in-range lift can have reset coordinates. Release where we last pressed/dragged.
             return PointerEvent(action: .up, point: lastPoint)
+        case .rightDown, .rightUp:
+            return nil
         case .move:
             guard sample.positionValid else { return nil }
             lastPoint = point
