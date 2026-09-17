@@ -9,6 +9,7 @@ enum CloseBehavior: Int {
 }
 
 final class SettingsPage: NSObject {
+    let materialToggle = NativeToggle("侧栏透明磨砂")
     let closePicker = NSPopUpButton()
     let loginToggle = NativeToggle("登录 Mac 时自动启动")
     let loginStatus = NativeLayout.text("")
@@ -16,19 +17,31 @@ final class SettingsPage: NSObject {
     var view: NSView!
     override init() {
         super.init()
-        closePicker.addItems(withTitles: ["关闭到菜单栏（隐藏 Dock 图标）", "关闭到 Dock（保留 Dock 图标）", "关闭就退出软件"])
+        materialToggle.state = UserDefaults.standard.object(forKey: "sidebarTransparency") as? Bool == false ? .off : .on
+        materialToggle.target = self; materialToggle.action = #selector(materialChanged)
+        closePicker.addItems(withTitles: ["留在菜单栏", "保留 Dock 图标", "退出软件"])
         closePicker.selectItem(at: CloseBehavior.current.rawValue)
         closePicker.target = self; closePicker.action = #selector(closeChanged)
         loginToggle.target = self; loginToggle.action = #selector(loginChanged)
         view = NativeLayout.page([
-            NativeLayout.text("关闭窗口", heading: true), closePicker,
-            NativeLayout.text("点击主窗口左上角红色关闭按钮时生效。默认关闭到菜单栏：程序继续控制笔，Dock 中不显示运行图标，可点击菜单栏 HID 重新打开。关闭到 Dock：窗口隐藏，点击 Dock 图标即可返回。选择退出：停止控制并释放笔接口。黄色最小化和绿色全屏按钮保持系统行为。"),
-            NativeLayout.text("开机自启动", heading: true), loginToggle, loginStatus, loginError,
-            NativeLayout.row([NSButton(title: "打开登录项设置…", target: self, action: #selector(openLoginSettings)), NSButton(title: "重新检查", target: self, action: #selector(refresh))]),
-            NativeLayout.text("自启动发生在登录 macOS 后。建议先把应用放入“应用程序”文件夹，再开启此选项，避免移动或删除构建目录后失效。若显示“等待系统批准”，打开系统设置 → 通用 → 登录项与扩展，允许 MiPad2Mac；以系统显示的实际名称为准。"),
-            NativeLayout.text("登录项许可与控制权限、输入监控分别管理。自启动后若缺少输入相关权限，应用会显示申请页面。系统阻止注册时会在此显示错误，不会显示为已开启。")
+            NativeLayout.text("外观与窗口", heading: true),
+            NativeLayout.card([
+                materialToggle,
+                NativeLayout.note("使用系统原生侧栏材质，并遵循降低透明度设置。"),
+                NativeLayout.separator(),
+                SettingsRow("关闭窗口时", control: closePicker, help: "留在菜单栏：继续运行，隐藏 Dock 图标，从菜单栏 HID 重开。保留 Dock 图标：只隐藏窗口。退出软件：停止控制并释放笔接口。黄色与绿色窗口按钮保持系统行为。")
+            ]),
+            NativeLayout.text("启动", heading: true),
+            NativeLayout.card([
+                loginToggle, loginStatus, loginError, NativeLayout.separator(),
+                SettingsRow("登录项管理", control: NativeLayout.row([NSButton(title: "系统设置…", target: self, action: #selector(openLoginSettings)), NSButton(title: "重新检查", target: self, action: #selector(refresh))]), help: "自启动发生在登录 macOS 后。建议将应用放入应用程序文件夹。若等待批准，请在系统设置 → 通用 → 登录项与扩展允许 MiPad2Mac。登录项许可与输入权限分别管理。")
+            ])
         ])
         refresh()
+    }
+    @objc func materialChanged() {
+        UserDefaults.standard.set(materialToggle.state == .on, forKey: "sidebarTransparency")
+        NotificationCenter.default.post(name: Notification.Name("MiPadSidebarAppearanceChanged"), object: nil)
     }
     @objc func closeChanged() {
         UserDefaults.standard.set(closePicker.indexOfSelectedItem, forKey: "windowCloseBehavior")
@@ -37,6 +50,8 @@ final class SettingsPage: NSObject {
         let status = SMAppService.mainApp.status
         loginToggle.state = (status == .enabled || status == .requiresApproval) ? .on : .off
         loginToggle.statusText = status == .requiresApproval ? "待批准" : nil
+        loginError.isHidden = loginError.stringValue.isEmpty
+        loginStatus.isHidden = status == .enabled || status == .notRegistered
         loginError.textColor = .systemRed
         loginStatus.textColor = status == .enabled ? .systemGreen : (status == .notRegistered ? .secondaryLabelColor : .systemOrange)
         switch status {

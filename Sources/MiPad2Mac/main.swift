@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import ApplicationServices
 import IOKit.hid
 import MiPadCore
@@ -13,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var permissionPage: PermissionPage!
     var permissionDialogPage: PermissionPage!
     var permissionWindow: NSWindow?
-    var tabs: NSTabView!
+    var tabs: SystemSettingsController!
     var automaticControl = AutomaticControl()
     let updateChecker = UpdateChecker()
     let testRecord = TestRecord()
@@ -99,10 +100,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 620), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.delegate = self
         window.title = "MiPad2Mac \(appVersion) · 实验版"
-        window.minSize = NSSize(width: 640, height: 440)
+        window.minSize = NSSize(width: 720, height: 580)
         window.setFrameAutosaveName("MiPadMainWindow")
         window.center(); window.isReleasedWhenClosed = false
         for label in [statusLabel, countsLabel, packetLabel, sampleLabel, permissionsLabel, controlLabel, rateTestLabel] { label.isSelectable = true }
@@ -121,83 +124,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         tabletToggle.target = self; tabletToggle.action = #selector(tabletModeChanged)
         tabletToggle.state = output.tabletEnabled ? .on : .off
         controlMode.target = self; controlMode.action = #selector(controlModeChanged)
-        controlMode.controlSize = .large
+        controlMode.controlSize = .regular
         controlMode.setAccessibilityLabel("输入处理方式")
-        let controlPage = NativeLayout.page([
-            NativeLayout.text("平板笔控制", heading: true),
-            NativeLayout.text("当前仅支持触控笔输入。"),
-            statusLabel,
-            NativeLayout.card([
-                NativeLayout.heading("处理方式", help: "macOS 原生处理：MiPad2Mac 不接管笔，系统仍可能响应移动。本机测试中，光标可能留在原来的屏幕，点击位置不一定对应；目标屏幕、旋转和翻转不生效。切换到原生处理不等于禁用笔。\n\nMiPad2Mac 控制：将笔尖映射到指定显示器，支持点击、拖动和方向调整；压感与倾斜由下方开关控制。笔和触控板共用一个光标。缺少权限或设备时会显示待处理状态，授权后再启用。\n\n两种方式均不影响 DP-in 视频显示。"),
-                controlMode, controlSummary
-            ]),
-            NativeLayout.heading("目标显示器", help: "选择平板对应的显示器。尺寸是 macOS 逻辑坐标，不是视频分辨率。修改显示器、旋转或翻转后会暂停控制，请重新选择 MiPad2Mac 控制。"),
-            screenPicker,
-            NativeLayout.row([NSTextField(labelWithString: "方向"), rotationPicker, flipX, flipY]),
-            NativeLayout.row([NSButton(title: "重新连接", target: self, action: #selector(reconnect)), NSButton(title: "权限检查…", target: self, action: #selector(showPermissions))]),
-            NativeLayout.heading("压力与倾斜", help: "默认开启并记住选择，菜单栏 HID 也可切换。开启后传递压感与倾斜，关闭后使用普通鼠标输出。切换会结束当前笔画，但保留原有的控制或暂停状态。\n\n已在本机 Photoshop 2026 验证，其他软件和系统待验证。"),
-            tabletToggle,
-            NativeLayout.row([NativeLayout.text("虚拟按键暂不支持"), HelpButton(title: "虚拟按键", explanation: "捏、双击和滑动笔杆尚未在已知笔接口观察到可用控制数据，目前不映射功能。报文采集位于测试页；这一结果不能证明其他接口收不到。")]),
-            NativeLayout.row([NativeLayout.text("关闭行为可在设置页调整"), HelpButton(title: "关闭窗口", explanation: "默认关闭窗口后留在菜单栏 HID 继续控制，并隐藏 Dock 图标。设置页可改为保留 Dock 或直接退出。暂停或退出会恢复系统原生处理，不影响视频显示。")])
-        ])
         monitoringToggle.target = self; monitoringToggle.action = #selector(monitoringChanged)
         monitoringToggle.state = monitoring ? .on : .off
         recordStateButton.target = self; recordStateButton.action = #selector(recordTestState)
         capturePicker.addItems(withTitles: ["轻压与重压", "左右与前后倾斜", "捏笔杆", "双击笔杆", "滑动笔杆", "静置与普通落笔对照"])
         captureButton.target = self; captureButton.action = #selector(startPenCapture)
-        let testPage = NativeLayout.page([
-            monitoringToggle,
-            NativeLayout.text("关闭后停止测试状态刷新、报文快照、速率测量和新增日志；已有日志仍可导出。正常笔控制所需的 HID 读取会继续，不受此开关影响。"),
-            NativeLayout.text("触控笔测试", heading: true),
-            NativeLayout.text("当前仅支持触控笔输入。先在控制页选择平板并启用控制，再打开平板测试页验证位置、轻点和拖动。"),
-            NSButton(title: "在平板打开触控测试页", target: self, action: #selector(showTestWindow)),
-            NativeLayout.text("控制输出", heading: true), controlLabel,
-            NativeLayout.text("笔输入状态", heading: true), countsLabel, packetLabel, sampleLabel,
-            rateTestButton, rateTestLabel,
-            NativeLayout.text("笔报文诊断", heading: true),
-            capturePicker, captureButton, captureLabel,
-            NativeLayout.text("仅在测试监控开启时采集已打开的笔接口，保留解析前原始报文、时间及变化位。每次最多 30 秒、12000 条、2 MiB，超限计数。导出包含最近一次采集；新采集会替换上一段原始数据。"),
-            NativeLayout.text("测试与调试记录", heading: true),
-            NativeLayout.text("记录连接状态、速率测试结果及测试窗口收到的按下/抬起。最多保留 200 条，仅在内存保存；可手动记录当前状态、导出或清空。不是完整 USB 抓包，也不记录键盘输入。"),
-            NativeLayout.row([recordStateButton, NSButton(title: "导出记录…", target: self, action: #selector(exportTestRecord)), NSButton(title: "清空记录", target: self, action: #selector(clearTestRecord))]),
-            testRecord.view
-        ])
+        autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
         permissionPage = PermissionPage(owner: self)
         permissionDialogPage = PermissionPage(owner: self)
-        let logo = NSImageView()
-        logo.image = NSApp.applicationIconImage
-        logo.imageScaling = .scaleProportionallyUpOrDown
-        logo.widthAnchor.constraint(equalToConstant: 112).isActive = true
-        logo.heightAnchor.constraint(equalToConstant: 112).isActive = true
-        autoUpdate.target = self; autoUpdate.action = #selector(updatePreferenceChanged)
-        autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
-        let aboutDetails = NSStackView(views: [
-            NativeLayout.text("MiPad2Mac \(appVersion)", heading: true),
-            NativeLayout.text("代码摘要：\(appSourceRevision)"),
-            NativeLayout.text("作者：力利欧 @L245T\nPowered by GPT6-Astra"),
-            NativeLayout.text("小米平板 DP-in 笔输入适配 · 开源实验项目"),
-            NSButton(title: "打开项目主页", target: self, action: #selector(openProject))
-        ])
-        aboutDetails.orientation = .vertical; aboutDetails.alignment = .leading; aboutDetails.spacing = 10
-        let aboutHeader = NSStackView(views: [logo, aboutDetails])
-        aboutHeader.orientation = .horizontal; aboutHeader.alignment = .top; aboutHeader.spacing = 24
-        aboutHeader.distribution = .fill
-        for label in aboutDetails.arrangedSubviews where label is NSTextField {
-            label.widthAnchor.constraint(equalTo: aboutDetails.widthAnchor).isActive = true
-        }
-        let aboutPage = NativeLayout.page([aboutHeader,
-            NativeLayout.text("版本更新", heading: true), updateLabel,
-            NSButton(title: "检查更新…", target: self, action: #selector(checkUpdates)), autoUpdate,
-            NativeLayout.text("检查会访问 GitHub Releases，仅提醒和打开下载页，不自动下载或安装。自动检查默认关闭；启用后不会弹窗打断笔操作。"),
-            NativeLayout.text("当前仅支持触控笔输入。基于 macOS 27 开发，macOS 26 暂未测试。"),
-            NativeLayout.text("赞助", heading: true),
-            NativeLayout.text("如果 MiPad2Mac 对你有帮助，欢迎自愿赞助，支持项目持续维护。感谢支持！"),
-            sponsorSection.view,
-            NativeLayout.text("使用微信或支付宝扫描对应二维码。看不清时可点击“查看原图”放大。")
-        ])
-        aboutHeader.widthAnchor.constraint(equalTo: aboutPage.contentView.widthAnchor, constant: -48).isActive = true
-        tabs = NativeLayout.tabs([("控制", controlPage), ("权限检查", permissionPage.view), ("测试", testPage), ("设置", settingsPage.view), ("关于", aboutPage)])
-        NativeLayout.install(tabs, in: window)
+        tabs = SystemSettingsController(app: self)
+        tabs.install(in: window)
     }
 
     func buildMenu() {
@@ -250,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 610, height: 470), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             w.title = "MiPad2Mac · 申请权限"; w.minSize = NSSize(width: 560, height: 400)
             w.isReleasedWhenClosed = false; w.center()
-            NativeLayout.install(permissionDialogPage.view, in: w); permissionWindow = w
+            w.contentViewController = NSHostingController(rootView: SettingsDetail(model: tabs.model, permissionsOnly: true)); permissionWindow = w
         }
         permissionWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
@@ -289,6 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         applyMonitoring(); refreshStats()
     }
     func applyMonitoring() {
+        packetLabel.isHidden = !monitoring; sampleLabel.isHidden = !monitoring
         testRecord.enabled = monitoring; reader.diagnosticsEnabled = monitoring
         rateTestButton.isEnabled = monitoring && !rateTestActive
         recordStateButton.isEnabled = monitoring
@@ -300,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             reader.measurement = nil; rateTestActive = false
             finishPenCapture(reason: "监控关闭")
             controlLabel.stringValue = "测试监控已关闭"
-            countsLabel.stringValue = "输入状态未刷新"
+            countsLabel.stringValue = "监控已暂停 · 开启后显示报文、坐标、压力与倾斜"
             packetLabel.stringValue = "报文快照已关闭"
             sampleLabel.stringValue = "坐标显示已暂停"
             rateTestLabel.stringValue = "开启测试监控后可运行 15 秒速率测试。"
@@ -356,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         testRecord.append(rateTestLabel.stringValue)
     }
     func refreshStats() {
+        defer { tabs?.model.sync() }
         if captureActive, let capture = reader.penCapture {
             let remaining = capture.start + capture.duration - ProcessInfo.processInfo.systemUptime
             if remaining <= 0 { finishPenCapture(reason: "采集完成") }

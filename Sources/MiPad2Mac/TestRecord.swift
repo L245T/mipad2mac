@@ -5,13 +5,15 @@ final class TestRecord {
     var enabled = false
     let view = NSScrollView()
     private let text = NSTextView()
+    var displayText: String { lines.joined(separator: "\n") }
     private var lines: [String] = []
     private let clock: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
     init() {
         view.hasVerticalScroller = true
-        view.borderType = .bezelBorder
+        view.borderType = .noBorder
+        view.scrollerStyle = .overlay; view.autohidesScrollers = true
         view.heightAnchor.constraint(equalToConstant: 180).isActive = true
         text.isEditable = false; text.isSelectable = true
         text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
