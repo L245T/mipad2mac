@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MiPadCore
 
 /// The presentation bridge refreshes at the existing 2 Hz UI cadence, never the HID cadence.
 final class SettingsPresentation: ObservableObject {
@@ -226,10 +227,13 @@ struct SettingsDetail: View {
                 LabeledContent("开源项目") { Button("打开 GitHub") { app.openProject() } }
             } footer: { footerNote("小米平板 DP-in 笔输入适配工具。基于 macOS 27 开发，macOS 26 暂未测试。") }
             Section {
-                LabeledContent("正式版本") { Button("检查更新…") { app.checkUpdates() } }
+                Picker("更新渠道", selection: Binding(get: { app.updateChecker.channel }, set: { value in model.act { app.updateChecker.selectChannel(value) } })) {
+                    ForEach(UpdateChannel.allCases, id: \.rawValue) { Text($0.title).tag($0) }
+                }
+                LabeledContent("软件更新") { Button("检查更新…") { app.checkUpdates() } }
                 Toggle("启动时检查更新", isOn: Binding(get: { app.autoUpdate.state == .on }, set: { value in model.act { app.autoUpdate.state = value ? .on : .off; app.updatePreferenceChanged() } }))
                 Text(app.updateLabel.stringValue).font(.callout).foregroundStyle(.secondary)
-            } header: { Text("版本更新") } footer: { footerNote("每天最多检查一次，不自动下载或安装。") }
+            } header: { Text("版本更新") } footer: { footerNote("稳定版仅检查正式发布；Beta 版也检查预发布。各渠道每天最多自动检查一次，不自动下载或安装。") }
             Section("赞助") {
                 Text("如果这个工具对你有帮助，欢迎自愿赞助。")
                 HStack(alignment: .top, spacing: 24) { sponsor("微信", file: "wechat", ext: "png"); sponsor("支付宝", file: "alipay", ext: "jpg") }.frame(maxWidth: .infinity)

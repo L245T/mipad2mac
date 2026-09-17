@@ -4,7 +4,7 @@ import ApplicationServices
 import IOKit.hid
 import MiPadCore
 
-let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.1"
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.0"
 let appSourceRevision = Bundle.main.object(forInfoDictionaryKey: "MiPadSourceRevision") as? String ?? "本地调试"
 
 
@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let settingsPage = SettingsPage()
     let sponsorSection = SponsorSection()
     let controlSummary = NativeLayout.text("准备启用笔控制")
-    let updateLabel = NativeLayout.text("可手动检查 GitHub 上发布的正式版本。")
+    let updateLabel = NativeLayout.text("可按所选渠道检查 GitHub Release。")
     let autoUpdate = NativeToggle("启动时检查更新（每天最多一次）")
     let controlMode = NSSegmentedControl(labels: ["macOS 原生处理", "MiPad2Mac 控制"], trackingMode: .selectOne, target: nil, action: nil)
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -95,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.activate(ignoringOtherApps: true)
         refreshStats()
         updateChecker.changed = { [weak self] text in self?.updateLabel.stringValue = text }
+        updateLabel.stringValue = updateChecker.idleMessage
         updateChecker.check(manual: false, window: window)
 
     }

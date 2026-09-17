@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 FILES = [
     '.gitignore', 'Package.swift', 'LICENSE', 'README.md', 'CHANGELOG.md',
-    'docs/DEVICE.md', 'docs/PUBLISHING.md', 'assets/branding/README.md',
+    'docs/DEVICE.md', 'docs/PUBLISHING.md', 'docs/UI.md', 'assets/branding/README.md',
     'assets/branding/mipad2mac-logo-v8.svg',
     'assets/branding/mipad2mac-app-icon-v8.svg',
     'assets/branding/mipad2mac-app-icon-v8.png',
