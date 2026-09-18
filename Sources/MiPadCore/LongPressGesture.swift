@@ -1,6 +1,29 @@
 import Foundation
 import CoreGraphics
 
+public enum LongPressJitterFilter: String, CaseIterable {
+    case veryHigh, high, medium, low, none
+    public var title: String {
+        switch self {
+        case .veryHigh: return "极高"
+        case .high: return "高"
+        case .medium: return "中"
+        case .low: return "低"
+        case .none: return "无"
+        }
+    }
+    /// Logical screen points; medium preserves the original movement tolerance.
+    public var tolerance: Double {
+        switch self {
+        case .veryHigh: return 12
+        case .high: return 8
+        case .medium: return 4
+        case .low: return 2
+        case .none: return 0
+        }
+    }
+}
+
 /// Ordinary pointer contacts are deferred; excluded drawing applications use PointerGesture unchanged.
 public struct LongPressGesture {
     private enum Phase { case idle, pending, dragging, direct, completed, suppressed }
@@ -8,6 +31,7 @@ public struct LongPressGesture {
     private var direct = PointerGesture()
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
+    private var jitterFilter = LongPressJitterFilter.medium
     public private(set) var deadline: TimeInterval?
     public var hasScheduledClick: Bool { deadline != nil }
     public var isIdle: Bool { phase == .idle }
@@ -15,14 +39,13 @@ public struct LongPressGesture {
     public init() {}
 
     public mutating func consume(_ sample: Sample, mapping: Mapping, now: TimeInterval,
-                                 enabled: Bool, delay: TimeInterval, drawing: Bool) -> [PointerEvent] {
+                                 enabled: Bool, delay: TimeInterval, drawing: Bool, jitterFilter: LongPressJitterFilter = .medium) -> [PointerEvent] {
         let contact = sample.touching && sample.inRange && !sample.eraser
         if phase == .completed {
             // The context menu owns subsequent motion. Never click or drag again until a new contact.
             if !contact { phase = .idle; deadline = nil }
             if !sample.inRange || !sample.positionValid || sample.eraser ||
-                hypot(mapping.point(x: sample.x, y: sample.y).x - origin.x,
-                      mapping.point(x: sample.x, y: sample.y).y - origin.y) >= 4 { deadline = nil }
+                movedBeyondTolerance(mapping.point(x: sample.x, y: sample.y)) { deadline = nil }
             guard sample.inRange && sample.positionValid && !sample.eraser else { return [] }
             return [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))]
         }
@@ -47,6 +70,7 @@ public struct LongPressGesture {
                 phase = .direct
                 return direct.consume(sample, mapping: mapping, drawing: drawing).map { [$0] } ?? []
             }
+            self.jitterFilter = jitterFilter
             origin = mapping.point(x: sample.x, y: sample.y); last = origin
             phase = .pending
             deadline = now + LongPressPreferences.validDelay(delay)
@@ -61,12 +85,17 @@ public struct LongPressGesture {
         let point = mapping.point(x: sample.x, y: sample.y)
         if phase == .pending {
             // Distance from initial contact, never accumulated path length. Movement wins over time.
-            guard hypot(point.x - origin.x, point.y - origin.y) >= 4 else { return [] }
+            guard movedBeyondTolerance(point) else { return [] }
             phase = .dragging; deadline = nil; last = point
             return [PointerEvent(action: .down, point: origin), PointerEvent(action: .drag, point: point)]
         }
         last = point
         return [PointerEvent(action: .drag, point: point)]
+    }
+
+    private func movedBeyondTolerance(_ point: CGPoint) -> Bool {
+        let distance = hypot(point.x - origin.x, point.y - origin.y)
+        return jitterFilter == .none ? distance > 0 : distance >= jitterFilter.tolerance
     }
 
     /// Called by a separate timer, independent of diagnostics refresh and report frequency.
@@ -112,6 +141,10 @@ public final class LongPressPreferences {
             return Self.validDelay(number.doubleValue)
         }
         set { defaults.set(Self.validDelay(newValue), forKey: "penLongPressDelay") }
+    }
+    public var jitterFilter: LongPressJitterFilter {
+        get { defaults.string(forKey: "penLongPressJitterFilter").flatMap(LongPressJitterFilter.init(rawValue:)) ?? .medium }
+        set { defaults.set(newValue.rawValue, forKey: "penLongPressJitterFilter") }
     }
     public var exclusions: [String: String] {
         get { defaults.dictionary(forKey: "penLongPressExcludedApps") as? [String: String] ?? ["com.adobe.Photoshop": "Adobe Photoshop"] }

@@ -199,3 +199,56 @@ private func feed(_ g: inout LongPressGesture, _ s: Sample, time: Double = 0, en
     defaults.set([1, 2], forKey: "penRightClickCompatibilityApps")
     #expect(!p.compatibilityEnabled); #expect(p.compatibilityApplications.isEmpty)
 }
+
+@Test func jitterLevelsControlDragAndCompatibilityCancellation() {
+    let mapping = Mapping(bounds: CGRect(x: 0, y: 0, width: 1025, height: 1025))
+    for level in LongPressJitterFilter.allCases {
+        var g = LongPressGesture()
+        func sample(_ offset: Double) -> Sample { pen(0.5 + offset / 1024) }
+        func send(_ offset: Double) -> [PointerEvent] {
+            g.consume(sample(offset), mapping: mapping, now: 0.2,
+                      enabled: true, delay: 0.6, drawing: false, jitterFilter: level)
+        }
+        _ = send(0)
+        let inside = level == .none ? 0 : level.tolerance - 0.5
+        #expect(send(inside).isEmpty)
+        let boundary = level == .none ? 0.125 : level.tolerance
+        #expect(send(boundary).map(\.action) == [.down, .drag])
+        #expect(g.fire(now: 5).isEmpty)
+        g.reset()
+        _ = send(0)
+        #expect(g.fire(now: 1, compatibility: true).map(\.action) == [.rightDown, .rightUp])
+        #expect(send(inside).map(\.action) == [.move])
+        #expect(g.hasScheduledClick)
+        #expect(send(boundary).map(\.action) == [.move])
+        #expect(!g.hasScheduledClick)
+        #expect(g.fire(now: 2, compatibility: true).isEmpty)
+    }
+}
+
+@Test func jitterLevelIsLatchedAndExcludedDrawingRemainsImmediate() {
+    var g = LongPressGesture()
+    _ = g.consume(pen(), mapping: screen, now: 0, enabled: true, delay: 0.6, drawing: false, jitterFilter: .veryHigh)
+    // A caller changing the argument cannot silently alter an in-progress contact.
+    #expect(g.consume(pen(0.51), mapping: screen, now: 0.2, enabled: true, delay: 0.6, drawing: false, jitterFilter: .none).isEmpty)
+    #expect(g.fire(now: 0.6).map(\.action) == [.rightDown, .rightUp])
+    g.reset()
+    #expect(g.consume(pen(), mapping: screen, now: 0, enabled: false, delay: 0.6, drawing: true, jitterFilter: .veryHigh).map(\.action) == [.down])
+    #expect(g.consume(pen(0.5001), mapping: screen, now: 0.2, enabled: false, delay: 0.6, drawing: true, jitterFilter: .veryHigh).map(\.action) == [.drag])
+}
+
+@Test func jitterPreferencesRestoreAllLevelsAndRejectUnknownValues() throws {
+    let suite = "LongPressJitterTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let prefs = LongPressPreferences(defaults: defaults)
+    #expect(prefs.jitterFilter == .medium)
+    for level in LongPressJitterFilter.allCases {
+        prefs.jitterFilter = level
+        #expect(LongPressPreferences(defaults: defaults).jitterFilter == level)
+    }
+    defaults.set("future-unknown", forKey: "penLongPressJitterFilter")
+    #expect(prefs.jitterFilter == .medium)
+    defaults.set(["invalid"], forKey: "penLongPressJitterFilter")
+    #expect(prefs.jitterFilter == .medium)
+}

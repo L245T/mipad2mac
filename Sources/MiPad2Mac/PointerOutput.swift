@@ -155,10 +155,10 @@ final class PointerOutput {
         if !contact && gesture.isPending { currentSample = contactSample }
         let wasPending = gesture.isPending
         let events = gesture.consume(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
-                                     enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled)
+                                     enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled, jitterFilter: longPress.jitterFilter)
         if wasPending && !gesture.isPending {
             longPressDiagnostic(events.contains { $0.action == .drag }
-                ? "长按取消：移动达到 4 逻辑点，进入拖动"
+                ? "长按取消：移动超出抖动过滤范围（\(longPress.jitterFilter.title)，\(longPress.jitterFilter.tolerance) 逻辑点），进入拖动"
                 : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围"))
         }
         emit(events)
