@@ -109,3 +109,6 @@ macOS26及以上的顶栏使用NSGlassEffectView regular，系统统一提供玻
 
 ## 统一平整玻璃（2026-09-18，替代前述顶栏/侧栏材质）
 顶栏和透明侧栏共用原生NSGlassEffectView regular，背景边缘向裁切区外延伸20pt以弱化凸起周边；顶栏底部28%做背景透明度渐变，标题独立保持清晰。侧栏不淡出，关闭透明仍显示纯灰。旧系统回退语义NSVisualEffectView。降低透明度时移除顶栏渐变，侧栏走不透明回退。这是公开玻璃API与背景遮罩组合，不是系统设置私有渐变模糊，也不保证逐像素复刻。
+
+## 系统管理侧栏（2026-09-18，替代上文侧栏玻璃）
+透明侧栏由NSSplitViewItem(sidebarWithViewController:)自动提供原生材质，不额外叠加NSGlassEffectView或NSVisualEffectView。关闭透明或系统降低透明度时使用已确认的纯灰背景。顶栏仍保留柔化的玻璃与底部过渡。当前macOS27浅色截图呈中性灰，不承诺不同壁纸/激活状态下与系统设置完全一致。
