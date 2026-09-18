@@ -229,37 +229,23 @@ struct SettingsDetail: View {
             SettingsSection {
                 DisclosureGroup {
                     settingDescription("先开启 MiPad2Mac 控制和长按右键。进入拖动后，本次接触不再触发右键。绘画排除名单中的应用（包括工具栏）不触发长按，以保护绘画。")
-                        .padding(.top, 8)
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("1. 确认长按条件").font(.headline)
-                        settingDescription("笔尖停住，等到设定时间；先在桌面试一次。")
-                    }
-                }
+                    Text("1. 确认长按条件").font(.headline)
+                }.disclosureGroupStyle(HelpDisclosureStyle(summary: "笔尖停住，等到设定时间；先在桌面试一次。"))
             }
             SettingsSection {
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 10) {
-                        settingDescription("用鼠标右键或触控板双指点按对照。CrxMouse 等扩展可能拦截首次右键；可临时停用扩展验证，或关闭扩展的右键菜单拦截。")
-                        HStack { Spacer(); Button("兼容设置…") { longPressHelpState.section = 1 } }
-                    }.padding(.top, 8)
+                    settingDescription("用鼠标右键或触控板双指点按对照。CrxMouse 等扩展可能拦截首次右键；可临时停用扩展验证，或关闭扩展的右键菜单拦截。")
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("2. 仅浏览器不响应？").font(.headline)
-                        settingDescription("检查鼠标手势扩展；需要时使用兼容设置。")
-                    }
-                }
+                    Text("2. 仅浏览器不响应？").font(.headline)
+                }.disclosureGroupStyle(HelpDisclosureStyle(summary: "检查鼠标手势扩展；需要时使用兼容设置。", compatibilityAction: { longPressHelpState.section = 1 }))
             }
             SettingsSection {
                 DisclosureGroup {
                     settingDescription("到测试页临时开启监控与日志，复现一次后查看长按判定记录，排查完关闭监控。事件提交计数不代表目标已显示菜单。")
-                        .padding(.top, 8)
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("3. 仍无响应？").font(.headline)
-                        settingDescription("部分区域没有菜单，网页也可能自行处理右键。")
-                    }
-                }
+                    Text("3. 仍无响应？").font(.headline)
+                }.disclosureGroupStyle(HelpDisclosureStyle(summary: "部分区域没有菜单，网页也可能自行处理右键。"))
             }
             footerNote("展开各项查看详细说明。")
         }.fixedSize(horizontal: false, vertical: true)
@@ -414,6 +400,47 @@ struct SettingsDetail: View {
                 Button("查看原图") { NSWorkspace.shared.open(url) }
             }
         }.frame(maxWidth: .infinity)
+    }
+}
+
+/// One disclosure layout keeps all three steps on the same text column.
+private struct HelpDisclosureStyle: DisclosureGroupStyle {
+    let summary: String
+    var compatibilityAction: (() -> Void)? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        configuration.isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                            .frame(width: 12).foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        configuration.label
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityValue(configuration.isExpanded ? "已展开" : "已收起")
+                    .accessibilityHint("显示或隐藏详细说明")
+                if let action = compatibilityAction {
+                    Button("兼容设置…", action: action).fixedSize()
+                }
+            }
+            Text(summary).font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 20)
+            if configuration.isExpanded {
+                configuration.content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 20).padding(.top, 4)
+                    .transition(.opacity)
+            }
+        }
     }
 }
 
