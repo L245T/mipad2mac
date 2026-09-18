@@ -185,9 +185,11 @@ struct SettingsPicker<Selection: Hashable, Content: View>: View {
 
 /// An AppKit background covers the titlebar region too; no SwiftUI safe-area inset.
 final class OpaqueSidebarBackground: NSView {
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
     override var isOpaque: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        NSColor(calibratedWhite: dark ? 0.16 : 0.90, alpha: 1).setFill()
         bounds.fill()
     }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -195,6 +197,22 @@ final class OpaqueSidebarBackground: NSView {
 
 /// Preserve AppKit tracking and overlay behavior; customize only the always-visible rail.
 final class SettingsScroller: NSScroller {
+    weak var ownerScroll: NSScrollView?
+    var titlebarInset: CGFloat = 0 {
+        didSet { if titlebarInset != oldValue { frame = frame } }
+    }
+    override var frame: NSRect {
+        get { super.frame }
+        set {
+            var adjusted = newValue
+            if titlebarInset > 0, scrollerStyle == .legacy, let scroll = ownerScroll {
+                let clip = scroll.contentView.frame
+                adjusted.origin.y = clip.minY + (scroll.isFlipped ? titlebarInset : 0)
+                adjusted.size.height = max(0, clip.height - titlebarInset)
+            }
+            super.frame = adjusted
+        }
+    }
     override class var isCompatibleWithOverlayScrollers: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         guard scrollerStyle == .legacy else { super.draw(dirtyRect); return }
@@ -215,10 +233,12 @@ final class SettingsScroller: NSScroller {
 /// No private class names, method swizzling or periodic hierarchy scans.
 struct SettingsScrollTrack: NSViewRepresentable {
     var extendsUnderTitlebar = false
+    var topInset: CGFloat = 0
     func makeNSView(context: Context) -> Marker { Marker() }
-    func updateNSView(_ view: Marker, context: Context) { view.extendsUnderTitlebar = extendsUnderTitlebar; view.installWhenAttached() }
+    func updateNSView(_ view: Marker, context: Context) { view.extendsUnderTitlebar = extendsUnderTitlebar; view.topInset = topInset; view.installWhenAttached() }
     final class Marker: NSView {
         var extendsUnderTitlebar = false
+        var topInset: CGFloat = 0
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); installWhenAttached() }
         func installWhenAttached() {
             DispatchQueue.main.async { [weak self] in
@@ -226,9 +246,14 @@ struct SettingsScrollTrack: NSViewRepresentable {
                 if self.extendsUnderTitlebar {
                     scroll.automaticallyAdjustsContentInsets = false
                     scroll.contentInsets = NSEdgeInsetsZero
+                    scroll.scrollerInsets = NSEdgeInsets(top: self.topInset, left: 0, bottom: 0, right: 0)
                 }
-                guard let original = scroll.verticalScroller,
-                      !(original is SettingsScroller) else { return }
+                if let existing = scroll.verticalScroller as? SettingsScroller {
+                    existing.ownerScroll = scroll
+                    existing.titlebarInset = self.extendsUnderTitlebar ? self.topInset : 0
+                    return
+                }
+                guard let original = scroll.verticalScroller else { return }
                 let replacement = SettingsScroller(frame: original.frame)
                 replacement.controlSize = original.controlSize
                 replacement.knobStyle = original.knobStyle
@@ -237,6 +262,8 @@ struct SettingsScrollTrack: NSViewRepresentable {
                 replacement.knobProportion = original.knobProportion
                 replacement.isEnabled = original.isEnabled
                 scroll.verticalScroller = replacement
+                replacement.ownerScroll = scroll
+                replacement.titlebarInset = self.extendsUnderTitlebar ? self.topInset : 0
             }
         }
     }

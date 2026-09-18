@@ -111,7 +111,7 @@ struct SettingsDetail: View {
                 }
             }
             }.padding(20).padding(.top, permissionsOnly ? 0 : model.contentTopInset).frame(maxWidth: .infinity, alignment: .leading)
-                .background(SettingsScrollTrack(extendsUnderTitlebar: !permissionsOnly))
+                .background(SettingsScrollTrack(extendsUnderTitlebar: !permissionsOnly, topInset: model.contentTopInset))
         }.scrollIndicators(.automatic)
             .ignoresSafeArea(.container, edges: permissionsOnly ? [] : .top)
             .background(Color(nsColor: .textBackgroundColor)).textSelection(.enabled)
