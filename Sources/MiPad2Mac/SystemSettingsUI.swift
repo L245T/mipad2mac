@@ -142,12 +142,11 @@ struct SettingsDetail: View {
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
             } header: { Text("显示器") } footer: { footerNote("修改映射会结束当前笔画，处理方式保持不变。显示的是逻辑分辨率。") }
-            SettingsSection("笔输入") {
+            SettingsSection {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
                 }.accessibilityLabel("压力与倾斜")
                 Toggle("长按右键", isOn: Binding(get: { app.output.longPress.enabled }, set: { value in model.act { app.output.changeLongPress { $0.enabled = value } } }))
-                HStack { Spacer(); Button("无法触发？") { longPressHelpState.shown = true } }
                 LabeledContent("长按时间") {
                     HStack {
                         Text(app.output.longPress.delay, format: .number.precision(.fractionLength(1)))
@@ -157,7 +156,10 @@ struct SettingsDetail: View {
                             .labelsHidden().accessibilityLabel("长按时间，秒")
                     }
                 }.disabled(!app.output.longPress.enabled)
-                LabeledContent("虚拟按键") { Text("暂不支持").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
+                LabeledContent("虚拟按键") { Text("研发中").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
+            } header: { Text("笔输入") } footer: {
+                Button("长按右键帮助…") { longPressHelpState.shown = true }
+                    .buttonStyle(.link)
             }
             SettingsSection {
                 ForEach(app.output.longPress.exclusions.keys.sorted(), id: \.self) { id in
@@ -170,6 +172,9 @@ struct SettingsDetail: View {
                 HStack { Spacer(); Button("添加应用…") { model.act { app.output.addExcludedApplication() } } }
             } header: { Text("不使用长按右键的应用") } footer: {
                 footerNote("这些应用保持即时落笔，包含工具栏在内均不触发长按。绘画前请将所用应用加入名单。普通应用轻点在抬笔时单击；移动超过轻微抖动范围后开始拖动。")
+            }
+            SettingsSection("手指输入") {
+                LabeledContent("状态") { Text("研发中").foregroundStyle(.secondary) }
             }
         }
     }
