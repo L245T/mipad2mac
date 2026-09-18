@@ -6,7 +6,7 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 
 - 主窗口使用 NSSplitViewController、原生侧栏和统一工具栏标题。侧栏固定 220 pt，不支持收起，不重复展示应用 Logo 与名称。品牌信息保留在关于页。
 - 侧栏使用 AppKit NSTableView 和 SF Symbols；控制使用 pencil。选中行采用系统 controlAccentColor，失焦采用 unemphasizedSelectedContentBackgroundColor；圆角 9 pt、行高 32 pt，保留原生键盘导航与无障碍语义。
-- 五个页面共享 SettingsSection 分组、LabeledContent、原生菜单和 NSSwitch。右侧承载视图约束到 NSWindow.contentLayoutGuide 下方并裁切，滚动内容不会穿过标题栏；滚动条由系统 ScrollView 管理，遵循系统显示偏好。
+- 五个页面共享 SettingsSection 分组、LabeledContent、原生菜单和 NSSwitch。右侧承载视图约束到 NSWindow.contentLayoutGuide 下方并裁切，滚动内容不会穿过标题栏；滚动条由系统 ScrollView 管理，遵循系统显示偏好。常驻竖向轨道使用 NSScroller 公开绘制接口呈现胶囊圆角，滑块及交互仍由 AppKit 处理；自动隐藏样式继续使用系统绘制。
 - 页面标题与正文标签共用右侧起点 30 pt（20 pt 外边距 + 10 pt 行内边距）。控制状态与连接操作统一放在首组，成功状态不再在底部重复；等待或失败时在首组保留原因。
 - 关联设置放在同一分组，标签在左、值或操作在右。长说明放在分组页脚或问号弹出说明中。
 - 状态和选中颜色使用系统语义颜色；分组底色按参考图校准为浅色白度 0.965 / 深色 0.18，并提供增强对比度变体。授权和运行状态同时保留文字，不只依赖颜色表达。原生处理状态为红色建议；只有已启用才显示绿色，等待或失败为橙色。状态旁问号展开当前处理方式的说明，并提供独立的无障碍名称。

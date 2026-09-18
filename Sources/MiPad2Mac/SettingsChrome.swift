@@ -37,6 +37,7 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
     required init?(coder: NSCoder) { fatalError() }
     override func loadView() {
         scroll.drawsBackground = false; scroll.hasVerticalScroller = true
+        scroll.verticalScroller = SettingsScroller()
         scroll.autohidesScrollers = true; scroll.borderType = .noBorder
 
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("page")))
@@ -183,4 +184,47 @@ final class OpaqueSidebarBackground: NSView {
         bounds.fill()
     }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Preserve AppKit tracking and overlay behavior; customize only the always-visible rail.
+final class SettingsScroller: NSScroller {
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        guard scrollerStyle == .legacy else { super.draw(dirtyRect); return }
+        drawKnobSlot(in: rect(for: .knobSlot), highlight: false)
+        super.drawKnob()
+    }
+    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+        guard scrollerStyle == .legacy else { super.drawKnobSlot(in: slotRect, highlight: flag); return }
+        let rail = rect(for: .knobSlot).insetBy(dx: 2, dy: 1)
+        guard rail.width > 0, rail.height > 0 else { return }
+        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        (increased ? NSColor.tertiaryLabelColor : NSColor.quaternaryLabelColor).setFill()
+        NSBezierPath(roundedRect: rail, xRadius: rail.width / 2, yRadius: rail.width / 2).fill()
+    }
+}
+
+/// Resolve the enclosing public NSScrollView from a marker inside SwiftUI scroll content.
+/// No private class names, method swizzling or periodic hierarchy scans.
+struct SettingsScrollTrack: NSViewRepresentable {
+    func makeNSView(context: Context) -> Marker { Marker() }
+    func updateNSView(_ view: Marker, context: Context) { view.installWhenAttached() }
+    final class Marker: NSView {
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); installWhenAttached() }
+        func installWhenAttached() {
+            DispatchQueue.main.async { [weak self] in
+                guard let scroll = self?.enclosingScrollView,
+                      let original = scroll.verticalScroller,
+                      !(original is SettingsScroller) else { return }
+                let replacement = SettingsScroller(frame: original.frame)
+                replacement.controlSize = original.controlSize
+                replacement.knobStyle = original.knobStyle
+                replacement.target = original.target; replacement.action = original.action
+                replacement.doubleValue = original.doubleValue
+                replacement.knobProportion = original.knobProportion
+                replacement.isEnabled = original.isEnabled
+                scroll.verticalScroller = replacement
+            }
+        }
+    }
 }

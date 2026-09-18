@@ -97,6 +97,7 @@ struct SettingsDetail: View {
                 }
             }
             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                .background(SettingsScrollTrack())
         }.scrollIndicators(.automatic)
             .background(Color(nsColor: .textBackgroundColor)).textSelection(.enabled)
             .controlSize(.regular).toggleStyle(SettingsToggleStyle()).labeledContentStyle(SettingsValueStyle())
@@ -195,6 +196,7 @@ struct SettingsDetail: View {
                     if longPressHelpState.section == 0 { longPressTroubleshooting }
                     else { longPressCompatibility }
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                .background(SettingsScrollTrack())
             }.background(Color(nsColor: .textBackgroundColor))
             Divider()
             HStack {
