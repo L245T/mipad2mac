@@ -147,7 +147,18 @@ struct SettingsDetail: View {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
                 }.accessibilityLabel("压力与倾斜")
-                Toggle("长按右键", isOn: Binding(get: { app.output.longPress.enabled }, set: { value in model.act { app.output.changeLongPress { $0.enabled = value } } }))
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("长按右键")
+                        Button("遇到问题，无法触发？") {
+                            longPressHelpState.prepare(for: app.window)
+                            longPressHelpState.shown = true
+                        }.buttonStyle(.link).font(.callout)
+                    }
+                    Spacer()
+                    Toggle("长按右键", isOn: Binding(get: { app.output.longPress.enabled }, set: { value in model.act { app.output.changeLongPress { $0.enabled = value } } }))
+                        .labelsHidden().toggleStyle(.switch).fixedSize().accessibilityLabel("长按右键")
+                }
                 LabeledContent("长按时间") {
                     HStack {
                         Text(app.output.longPress.delay, format: .number.precision(.fractionLength(1)))
@@ -158,10 +169,7 @@ struct SettingsDetail: View {
                     }
                 }.disabled(!app.output.longPress.enabled)
                 LabeledContent("虚拟按键") { Text("研发中").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
-            } header: { Text("笔输入") } footer: {
-                Button("长按右键帮助…") { longPressHelpState.shown = true }
-                    .buttonStyle(.link)
-            }
+            } header: { Text("笔输入") } footer: { EmptyView() }
             SettingsSection {
                 ForEach(app.output.longPress.exclusions.keys.sorted(), id: \.self) { id in
                     LabeledContent(app.output.longPress.exclusions[id] ?? id) {
@@ -183,8 +191,6 @@ struct SettingsDetail: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("长按右键帮助").font(.title2.bold())
-                Text("检查触发条件，或为鼠标手势扩展设置兼容选项。")
-                    .font(.callout).foregroundStyle(.secondary)
                 Picker("帮助内容", selection: $longPressHelpState.section) {
                     Text("排查步骤").tag(0)
                     Text("兼容设置").tag(1)
@@ -208,29 +214,54 @@ struct SettingsDetail: View {
                     .keyboardShortcut(.defaultAction)
             }.padding(.horizontal, 20).padding(.vertical, 14)
         }
-        .frame(width: 560, height: 580)
+        .frame(width: longPressHelpState.size.width, height: longPressHelpState.size.height)
         .controlSize(.regular).toggleStyle(SettingsToggleStyle())
         .onExitCommand { longPressHelpState.shown = false }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification, object: app.window)) { _ in
+            longPressHelpState.fit(to: app.window)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeScreenNotification, object: app.window)) { _ in
+            longPressHelpState.fit(to: app.window)
+        }
     }
     private var longPressTroubleshooting: some View {
         Group {
-            SettingsSection("1. 检查触发条件") {
-                Text("先确认 MiPad2Mac 控制和长按右键已开启。落笔后保持原位置，达到设定的长按时间；进入拖动后，本次接触不会再触发右键。")
-                settingDescription("Photoshop 等绘画排除名单中的应用不启用长按右键，包括工具栏。这是为了保护绘画。")
-            }
-            SettingsSection("2. 检查浏览器扩展") {
-                Text("桌面可以、浏览器不行时，请用鼠标右键或触控板双指点按作对照。CrxMouse 等手势扩展可能拦截第一次右键，要求再次右键才显示菜单。")
-                settingDescription("可在 Chrome 的扩展程序管理中临时停用相关扩展验证，或在扩展设置中关闭右键菜单拦截。")
-                HStack {
-                    Text("需要保留扩展的拦截行为？").font(.callout)
-                    Spacer()
-                    Button("兼容设置…") { longPressHelpState.section = 1 }
+            SettingsSection {
+                DisclosureGroup {
+                    settingDescription("先开启 MiPad2Mac 控制和长按右键。进入拖动后，本次接触不再触发右键。绘画排除名单中的应用（包括工具栏）不触发长按，以保护绘画。")
+                        .padding(.top, 8)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("1. 确认长按条件").font(.headline)
+                        settingDescription("笔尖停住，等到设定时间；先在桌面试一次。")
+                    }
                 }
             }
-            SettingsSection("3. 仍然无法触发") {
-                Text("只有特定页面或区域无菜单时，目标可能没有菜单或网页自行处理了右键。")
-                settingDescription("到测试页临时开启监控与日志，复现一次并查看长按判定记录；排查后关闭监控。提交计数不代表目标已显示菜单。")
+            SettingsSection {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 10) {
+                        settingDescription("用鼠标右键或触控板双指点按对照。CrxMouse 等扩展可能拦截首次右键；可临时停用扩展验证，或关闭扩展的右键菜单拦截。")
+                        HStack { Spacer(); Button("兼容设置…") { longPressHelpState.section = 1 } }
+                    }.padding(.top, 8)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("2. 仅浏览器不响应？").font(.headline)
+                        settingDescription("检查鼠标手势扩展；需要时使用兼容设置。")
+                    }
+                }
             }
+            SettingsSection {
+                DisclosureGroup {
+                    settingDescription("到测试页临时开启监控与日志，复现一次后查看长按判定记录，排查完关闭监控。事件提交计数不代表目标已显示菜单。")
+                        .padding(.top, 8)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("3. 仍无响应？").font(.headline)
+                        settingDescription("部分区域没有菜单，网页也可能自行处理右键。")
+                    }
+                }
+            }
+            footerNote("展开各项查看详细说明。")
         }.fixedSize(horizontal: false, vertical: true)
     }
     private var longPressCompatibility: some View {
@@ -389,6 +420,21 @@ struct SettingsDetail: View {
 private final class LongPressHelpState: ObservableObject {
     @Published var shown = false
     @Published var section = 0
+    @Published var size = NSSize(width: 560, height: 480)
+    func prepare(for parent: NSWindow) {
+        section = 0
+        fit(to: parent)
+    }
+    func fit(to parent: NSWindow) {
+        let content = parent.contentLayoutRect
+        let visible = parent.screen?.visibleFrame ?? parent.frame
+        let attachmentTop = parent.convertToScreen(content).maxY
+        // Reserve space beneath the sheet and within the parent; never resize the parent.
+        let height = max(1, min(520, content.height - 32, attachmentTop - visible.minY - 20))
+        let width = max(1, min(560, parent.frame.width - 64, visible.width - 40))
+        let next = NSSize(width: width, height: height)
+        if size != next { size = next }
+    }
 }
 
 private final class ExplanationState: ObservableObject { @Published var shown = false }
