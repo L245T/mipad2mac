@@ -168,16 +168,28 @@ struct SettingsDetail: View {
                             .labelsHidden().accessibilityLabel("长按时间，秒")
                     }
                 }.disabled(!app.output.longPress.enabled)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
-                        SettingsPicker("长按防抖", selection: Binding(get: { app.output.longPress.jitterFilter }, set: { value in model.act { app.output.changeLongPress { $0.jitterFilter = value } } })) {
-                            ForEach(LongPressJitterFilter.allCases, id: \.self) {
-                                Text($0 == .medium ? "中（默认）" : $0.title).tag($0)
-                            }
-                        }.disabled(!app.output.longPress.enabled)
-                        ExplanationButton(text: "过滤长按时的笔尖抖动，不改变长按等待时间。\n\n中为默认档位，保持原有手感。“无”不容忍实际位移，但笔尖完全静止时仍可触发长按右键。\n\n设置自动保存；绘画排除名单中的应用不受此设置影响。", label: "长按防抖说明")
+                        Text("长按防抖")
+                        Spacer()
+                        Text(jitterValueLabel).monospacedDigit().foregroundStyle(.secondary)
+                        ExplanationButton(text: "过滤长按时的笔尖抖动，可选择0–18的任一整数，单位为逻辑点，不改变长按等待时间。\n\n默认中（4），保留原有手感。无（0）不容忍实际位移，但完全静止仍可触发长按右键。\n\n设置自动保存；绘画排除名单中的应用不受影响。", label: "长按防抖说明")
                     }
-                    settingDescription("档位越高，越能容忍笔尖抖动；开始拖动也需移动更远。")
+                    SettingsIntegerSlider(value: Binding(get: { app.output.longPress.jitterFilter.tolerance }, set: { value in
+                        model.act { app.output.changeLongPress { $0.jitterFilter = LongPressJitterFilter(tolerance: value) } }
+                    })).frame(height: 24).disabled(!app.output.longPress.enabled)
+                    GeometryReader { geometry in
+                        ForEach(LongPressJitterFilter.landmarks, id: \.self) { level in
+                            VStack(spacing: 3) {
+                                Circle().fill(.tertiary).frame(width: 3, height: 3)
+                                Text(level.title).font(.caption)
+                                Text("\(Int(level.tolerance))").font(.caption2).monospacedDigit()
+                            }.foregroundStyle(.secondary).frame(width: 36)
+                                .position(x: 8 + (geometry.size.width - 16) * level.tolerance / 18, y: 22)
+                                .accessibilityHidden(true)
+                        }
+                    }.frame(height: 44)
+                    settingDescription("数值越大，越能容忍笔尖抖动；开始拖动也需移动更远。")
                 }
                 LabeledContent("虚拟按键") { Text("研发中").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
             } header: { Text("笔输入") } footer: { EmptyView() }
@@ -197,6 +209,12 @@ struct SettingsDetail: View {
                 LabeledContent("状态") { Text("研发中").foregroundStyle(.secondary) }
             }
         }
+    }
+    private var jitterValueLabel: String {
+        let level = app.output.longPress.jitterFilter
+        let number = String(Int(level.tolerance))
+        if level == .medium { return "中 · 4（默认）" }
+        return LongPressJitterFilter.landmarks.contains(level) ? "\(level.title) · \(number)" : number
     }
     private var longPressHelp: some View {
         VStack(spacing: 0) {

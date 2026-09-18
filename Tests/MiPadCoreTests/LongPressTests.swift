@@ -252,3 +252,22 @@ private func feed(_ g: inout LongPressGesture, _ s: Sample, time: Double = 0, en
     defaults.set(["invalid"], forKey: "penLongPressJitterFilter")
     #expect(prefs.jitterFilter == .medium)
 }
+
+
+@Test func integerJitterPreservesLegacyValuesAndBounds() throws {
+    let legacy: [(String, Double)] = [("none", 0), ("low", 2), ("medium", 4), ("high", 8), ("veryHigh", 12)]
+    for (key, value) in legacy {
+        let filter = try #require(LongPressJitterFilter(rawValue: key))
+        #expect(filter.tolerance == value)
+        #expect(filter.rawValue == key)
+    }
+    #expect(LongPressJitterFilter.allCases.map(\.tolerance) == (0...18).map(Double.init))
+    #expect(LongPressJitterFilter(tolerance: 5.4).tolerance == 5)
+    #expect(LongPressJitterFilter(tolerance: 5.6).tolerance == 6)
+    #expect(LongPressJitterFilter(tolerance: -1).tolerance == 0)
+    #expect(LongPressJitterFilter(tolerance: 19).tolerance == 18)
+    #expect(LongPressJitterFilter(tolerance: .nan) == .medium)
+    #expect(LongPressJitterFilter(rawValue: "19") == nil)
+    #expect(LongPressJitterFilter(rawValue: "-1") == nil)
+    #expect(LongPressJitterFilter(rawValue: "1.5") == nil)
+}

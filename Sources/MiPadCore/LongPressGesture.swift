@@ -1,27 +1,53 @@
 import Foundation
 import CoreGraphics
 
-public enum LongPressJitterFilter: String, CaseIterable {
-    case veryHigh, high, medium, low, none
+/// Integer tolerance with stable legacy names for previously saved five-level preferences.
+public struct LongPressJitterFilter: RawRepresentable, Hashable, CaseIterable {
+    public let tolerance: Double
+    public init(tolerance: Double) {
+        self.tolerance = tolerance.isFinite ? min(18, max(0, tolerance.rounded())) : 4
+    }
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "none": self = .none
+        case "low": self = .low
+        case "medium": self = .medium
+        case "high": self = .high
+        case "veryHigh": self = .veryHigh
+        default:
+            guard let value = Int(rawValue), (0...18).contains(value) else { return nil }
+            self.init(tolerance: Double(value))
+        }
+    }
+    public var rawValue: String {
+        switch tolerance {
+        case 0: return "none"
+        case 2: return "low"
+        case 4: return "medium"
+        case 8: return "high"
+        case 12: return "veryHigh"
+        default: return String(Int(tolerance))
+        }
+    }
     public var title: String {
-        switch self {
-        case .veryHigh: return "极高"
-        case .high: return "高"
-        case .medium: return "中"
-        case .low: return "低"
-        case .none: return "无"
+        switch tolerance {
+        case 0: return "无"
+        case 2: return "低"
+        case 4: return "中"
+        case 8: return "高"
+        case 12: return "极高"
+        case 18: return "最高"
+        default: return String(Int(tolerance))
         }
     }
-    /// Logical screen points; medium preserves the original movement tolerance.
-    public var tolerance: Double {
-        switch self {
-        case .veryHigh: return 12
-        case .high: return 8
-        case .medium: return 4
-        case .low: return 2
-        case .none: return 0
-        }
-    }
+    public static let none = Self(tolerance: 0)
+    public static let low = Self(tolerance: 2)
+    public static let medium = Self(tolerance: 4)
+    public static let high = Self(tolerance: 8)
+    public static let veryHigh = Self(tolerance: 12)
+    public static let maximum = Self(tolerance: 18)
+    public static let landmarks: [Self] = [.none, .low, .medium, .high, .veryHigh, .maximum]
+    public static var allCases: [Self] { (0...18).map { Self(tolerance: Double($0)) } }
 }
 
 /// Ordinary pointer contacts are deferred; excluded drawing applications use PointerGesture unchanged.
