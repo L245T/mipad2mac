@@ -10,6 +10,8 @@ if [[ "${MIPAD_BETA:-0}" == "1" ]]; then
     REMOTE_REVISION="$(git ls-remote https://github.com/L245T/mipad2mac.git refs/heads/master | cut -f1)"
     [[ "$BETA_REVISION" == "$REMOTE_REVISION" ]] || { echo "Public master does not match; refusing Beta filename." >&2; exit 1; }
 fi
+DMGBUILD="${MIPAD_DMGBUILD:-dmgbuild}"
+command -v "$DMGBUILD" >/dev/null 2>&1 || { echo "Install dmgbuild 1.6.7 and set MIPAD_DMGBUILD to its executable; see docs/PUBLISHING.md." >&2; exit 1; }
 bash scripts/build-app.sh
 APP="$PWD/dist/MiPad2Mac.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
@@ -17,7 +19,9 @@ WORK="$(mktemp -d "$PWD/dist/.dmg.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/content"
 ditto "$APP" "$WORK/content/MiPad2Mac.app"
-ln -s /Applications "$WORK/content/Applications"
+swift -module-cache-path "$PWD/.build/module-cache" scripts/dmg-background.swift "$WORK/background@2x.png"
+sips -z 440 660 -s dpiWidth 72 -s dpiHeight 72 "$WORK/background@2x.png" --out "$WORK/background.png" >/dev/null
+tiffutil -cathidpicheck "$WORK/background.png" "$WORK/background@2x.png" -out "$WORK/content/background.tiff"
 cat > "$WORK/content/安装说明.txt" <<'TEXT'
 MiPad2Mac 安装说明
 
@@ -29,7 +33,7 @@ MiPad2Mac 安装说明
 请不要直接在磁盘映像中运行应用。更换安装路径后若系统权限不生效，
 请在系统设置中核对授权的应用路径。
 TEXT
-hdiutil create -volname "MiPad2Mac $VERSION" -srcfolder "$WORK/content" -format UDZO -ov "$WORK/package.dmg"
+"$DMGBUILD" -s scripts/dmg-settings.py -D "content=$WORK/content" "MiPad2Mac $VERSION" "$WORK/package.dmg"
 hdiutil verify "$WORK/package.dmg"
 PACKAGE_VERSION="$VERSION"
 if [[ "${MIPAD_BETA:-0}" == "1" ]]; then

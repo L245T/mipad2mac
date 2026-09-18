@@ -60,3 +60,17 @@ MIPAD_REVISION_REPO=/path/to/public-checkout MIPAD_REQUIRE_GIT_REVISION=1 bash s
 - UI 规范公开稿为 `docs/UI.md`；本地设计交接、用户参考截图、idea 和原始诊断不随公开文档上传。
 - 导出脚本的清单已包含 `docs/UI.md`。该脚本只生成待审快照，不能代替本地与公开文件差异审查；保留公开仓库已有的构建脚本和文档差异。
 - 本地开发历史与公开历史分别提交，不强推或用本地开发分支覆盖公开历史。
+
+## DMG 安装窗口
+
+打包使用 dmgbuild 1.6.7 写入 Finder 布局，Swift/AppKit 生成中英文均可清晰显示的双分辨率背景。左侧 App、右侧 Applications、中间箭头；安装说明位于下方。背景和布局自包含于映像，不依赖开发机路径，不通过 Finder UI 自动化排版。
+
+首次准备：
+
+```sh
+python3 -m venv .build/dmg-tools
+.build/dmg-tools/bin/pip install 'dmgbuild==1.6.7'
+MIPAD_DMGBUILD="$PWD/.build/dmg-tools/bin/dmgbuild" bash scripts/build-dmg.sh
+```
+
+每次发布需挂载最终 DMG 目视核对背景、文字、图标位置和 Applications 入口；首次布局实施需验证复制。最终文件生成后再计算 SHA-256，上传后核对附件。Release 正文依次为更新内容、注意事项（如有）、下载与安装、第三方备用下载（国内下载）、末尾 SHA-256；工程验证记录不放入正文。

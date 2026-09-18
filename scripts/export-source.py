@@ -13,6 +13,7 @@ FILES = [
     'assets/branding/mipad2mac-app-icon-v8.png',
     'assets/sponsor/wechat.png', 'assets/sponsor/alipay.jpg',
     'scripts/build-app.sh', 'scripts/build-icon.sh', 'scripts/build-dmg.sh',
+    'scripts/dmg-background.swift', 'scripts/dmg-settings.py',
     'scripts/test.sh', 'scripts/export-source.py', 'scripts/source-revision.py',
     'scripts/build-revision.py', 'scripts/test-build-revision.py',
 ]
