@@ -88,13 +88,17 @@ private struct SettingsSwitch: NSViewRepresentable {
     @Environment(\.isEnabled) private var isEnabled
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSwitch {
-        let control = NSSwitch(); control.controlSize = .regular
+        let control = NSSwitch(); control.controlSize = .mini
         control.target = context.coordinator; control.action = #selector(Coordinator.changed(_:))
         control.setContentHuggingPriority(.required, for: .horizontal)
         return control
     }
     func updateNSView(_ control: NSSwitch, context: Context) {
-        context.coordinator.parent = self; control.state = isOn ? .on : .off; control.isEnabled = isEnabled
+        context.coordinator.parent = self
+        let next: NSControl.StateValue = isOn ? .on : .off
+        // Avoid resetting the native tracking animation during unrelated SwiftUI refreshes.
+        if control.state != next { control.state = next }
+        control.isEnabled = isEnabled
     }
     final class Coordinator: NSObject {
         var parent: SettingsSwitch
@@ -106,7 +110,7 @@ struct SettingsToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) { configuration.label }.frame(maxWidth: .infinity, alignment: .leading)
-            SettingsSwitch(isOn: configuration.$isOn).fixedSize()
+            SettingsSwitch(isOn: configuration.$isOn).controlSize(.mini).fixedSize()
         }.accessibilityElement(children: .combine)
     }
 }
@@ -229,56 +233,13 @@ struct SettingsScrollTrack: NSViewRepresentable {
     }
 }
 
-/// System-drawn slider picks up the current macOS control material and accessibility behavior.
-struct SettingsIntegerSlider: NSViewRepresentable {
+/// Let SwiftUI own native tracking, integer stepping, geometry and Liquid Glass feedback.
+struct SettingsIntegerSlider: View {
     @Binding var value: Double
-    @Environment(\.isEnabled) private var isEnabled
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSSlider {
-        let slider = IntegerStepSlider(value: value, minValue: 0, maxValue: 18, target: context.coordinator, action: #selector(Coordinator.changed(_:)))
-        slider.controlSize = .regular
-        slider.isContinuous = true
-        slider.altIncrementValue = 1
-        slider.setAccessibilityLabel("长按防抖")
-        if #available(macOS 26, *) { slider.tintProminence = .primary }
-        return slider
-    }
-    func updateNSView(_ slider: NSSlider, context: Context) {
-        context.coordinator.parent = self
-        slider.doubleValue = value
-        slider.isEnabled = isEnabled
-        slider.setAccessibilityValueDescription("\(Int(value))，范围0到18")
-    }
-    final class Coordinator: NSObject {
-        var parent: SettingsIntegerSlider
-        init(_ parent: SettingsIntegerSlider) { self.parent = parent }
-        @objc func changed(_ sender: NSSlider) {
-            let next = min(18, max(0, sender.doubleValue.rounded()))
-            sender.doubleValue = next
-            if parent.value != next { parent.value = next }
-        }
-    }
-}
-
-/// Keep the native appearance while making keyboard and accessibility changes whole steps.
-private final class IntegerStepSlider: NSSlider {
-    override var acceptsFirstResponder: Bool { true }
-    override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
-    }
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 123, 125: step(-1)
-        case 124, 126: step(1)
-        default: super.keyDown(with: event)
-        }
-    }
-    override func accessibilityPerformIncrement() -> Bool { step(1); return isEnabled }
-    override func accessibilityPerformDecrement() -> Bool { step(-1); return isEnabled }
-    private func step(_ amount: Double) {
-        guard isEnabled else { return }
-        doubleValue = min(maxValue, max(minValue, doubleValue.rounded() + amount))
-        sendAction(action, to: target)
+    var body: some View {
+        Slider(value: $value, in: 0...18, step: 1) { Text("长按防抖") }
+            .labelsHidden()
+            .controlSize(.regular)
+            .accessibilityValue("\(Int(value))，范围0到18")
     }
 }

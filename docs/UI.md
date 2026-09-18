@@ -33,7 +33,7 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 
 ## 长按防抖
 
-控制页在长按时间下方显示“长按防抖”。使用系统绘制的 NSSlider，0–18 每个整数可选，鼠标、方向键和可访问性增减均按整数保存。macOS 26+ 采用原生 primary tint 外观，随系统呈现玻璃材质；macOS 26 尚未实测。标题右侧显示当前值，默认显示“中 · 4（默认）”。滑轨下按实际数值位置标注无 0、低 2、中 4、高 8、极高 12、最高 18，不使用等距六档。次要说明明确容忍抖动与拖动距离的取舍；问号补充 0 仍可静止长按、等待时间独立、自动保存及绘画排除不受影响。关闭长按后滑块禁用，说明仍可查看。旧五档存储名称和值兼容，新增中间整数以数值字符串保存。
+控制页在长按时间下方显示“长按防抖”。使用系统绘制的 SwiftUI Slider，0–18 每个整数可选，鼠标、方向键和可访问性增减均按整数保存。macOS 26+ 采用原生强调色外观，随系统呈现玻璃材质；macOS 26 尚未实测。标题右侧显示当前值，默认显示“中 · 4（默认）”。滑轨下按实际数值位置标注无 0、低 2、中 4、高 8、极高 12、最高 18，不使用等距六档。次要说明明确容忍抖动与拖动距离的取舍；问号补充 0 仍可静止长按、等待时间独立、自动保存及绘画排除不受影响。关闭长按后滑块禁用，说明仍可查看。旧五档存储名称和值兼容，新增中间整数以数值字符串保存。
 
 ## 行为约束
 
@@ -70,3 +70,9 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 - [SF Symbols](https://developer.apple.com/design/human-interface-guidelines/sf-symbols)
 - [Branding](https://developer.apple.com/design/human-interface-guidelines/branding)
 - [Build an AppKit app with the new design](https://developer.apple.com/videos/play/wwdc2025/310/)
+
+## 原生控件与新版 SDK
+
+开关使用 NSSwitch / SwiftUI Switch 的 mini 尺寸，按系统内在尺寸布局；滑块使用 SwiftUI Slider regular 尺寸与原生 step: 1，采用系统高度，不手工缩放滑钮。原生控件负责 Liquid Glass 外观和按下/切换/拖动反馈，不叠加自绘玻璃层。SwiftUI 刷新仅在状态变化时写回原生控件，避免无关刷新干扰控件追踪动画。
+
+构建明确传入当前选择的 macOS SDK 路径和实际 SDK 版本，并检查 Mach-O 的链接 SDK 与其一致，防止 Swift Build 将部署下限误记为 SDK 导致旧外观。最低系统版本仍为 13.0；新版控件基于 macOS 27 验证，macOS 26 未实测。苹果参考：[Build an AppKit app with the new design](https://developer.apple.com/videos/play/wwdc2025/310/)、[Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)。

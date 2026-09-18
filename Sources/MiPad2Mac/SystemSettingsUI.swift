@@ -157,7 +157,7 @@ struct SettingsDetail: View {
                     }
                     Spacer()
                     Toggle("长按右键", isOn: Binding(get: { app.output.longPress.enabled }, set: { value in model.act { app.output.changeLongPress { $0.enabled = value } } }))
-                        .labelsHidden().toggleStyle(.switch).fixedSize().accessibilityLabel("长按右键")
+                        .labelsHidden().toggleStyle(.switch).controlSize(.mini).fixedSize().accessibilityLabel("长按右键")
                 }
                 LabeledContent("长按时间") {
                     HStack {
@@ -177,7 +177,7 @@ struct SettingsDetail: View {
                     }
                     SettingsIntegerSlider(value: Binding(get: { app.output.longPress.jitterFilter.tolerance }, set: { value in
                         model.act { app.output.changeLongPress { $0.jitterFilter = LongPressJitterFilter(tolerance: value) } }
-                    })).frame(height: 24).disabled(!app.output.longPress.enabled)
+                    })).disabled(!app.output.longPress.enabled)
                     GeometryReader { geometry in
                         ForEach(LongPressJitterFilter.landmarks, id: \.self) { level in
                             VStack(spacing: 3) {

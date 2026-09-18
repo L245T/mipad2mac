@@ -5,7 +5,15 @@ export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
 SOURCE_REVISION="$(python3 scripts/source-revision.py)"
 GIT_REVISION="$(python3 scripts/build-revision.py)"
-swift build -c release --disable-sandbox --cache-path .build/cache
+# Swift Build may record the deployment target as the linked SDK version.
+# Pass the actual selected SDK to both compilation and linking so AppKit opts
+# into that SDK's native controls. Keep 13.0 aligned with Package.swift/plist.
+BUILD_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+BUILD_SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+swift build -c release --disable-sandbox --cache-path .build/cache --sdk "$BUILD_SDK_PATH" \
+    -Xlinker -platform_version -Xlinker macos -Xlinker 13.0 -Xlinker "$BUILD_SDK_VERSION"
+LINKED_SDK_VERSION="$(xcrun otool -l .build/release/MiPad2Mac | awk '$1 == "sdk" {print $2; exit}')"
+[[ "$LINKED_SDK_VERSION" == "$BUILD_SDK_VERSION" ]] || { echo "Linked SDK does not match the selected SDK; refusing package." >&2; exit 1; }
 mkdir -p "$PWD/dist"
 STAGING="$(mktemp -d "$PWD/dist/.app-build.XXXXXX")"
 trap 'rm -rf "$STAGING"' EXIT
