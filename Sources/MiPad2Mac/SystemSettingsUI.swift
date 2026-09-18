@@ -7,6 +7,7 @@ final class SettingsPresentation: ObservableObject {
     unowned let app: AppDelegate
     @Published var generation = 0
     @Published var selection = 0
+    @Published var contentTopInset: CGFloat = 0
     private var signature = ""
     init(_ app: AppDelegate) { self.app = app }
     func sync() {
@@ -109,9 +110,10 @@ struct SettingsDetail: View {
                 default: about
                 }
             }
-            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                .background(SettingsScrollTrack())
+            }.padding(20).padding(.top, permissionsOnly ? 0 : model.contentTopInset).frame(maxWidth: .infinity, alignment: .leading)
+                .background(SettingsScrollTrack(extendsUnderTitlebar: !permissionsOnly))
         }.scrollIndicators(.automatic)
+            .ignoresSafeArea(.container, edges: permissionsOnly ? [] : .top)
             .background(Color(nsColor: .textBackgroundColor)).textSelection(.enabled)
             .controlSize(.regular).toggleStyle(SettingsToggleStyle()).labeledContentStyle(SettingsValueStyle())
             .sheet(isPresented: $longPressHelpState.shown) { longPressHelp }

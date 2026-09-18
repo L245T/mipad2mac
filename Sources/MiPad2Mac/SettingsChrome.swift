@@ -2,21 +2,27 @@ import AppKit
 import SwiftUI
 import MiPadCore
 
-/// Keep scrolling content entirely below the system title/toolbar, even at its top edge.
+/// Scroll content behind a native frosted titlebar, with a matching initial inset.
 final class SettingsContentController: NSViewController {
     let host: NSHostingController<SettingsDetail>
     let heading = NSTextField(labelWithString: "控制")
-    init(model: SettingsPresentation) { host = NSHostingController(rootView: SettingsDetail(model: model)); super.init(nibName: nil, bundle: nil) }
+    private let header = NSVisualEffectView()
+    private let model: SettingsPresentation
+    init(model: SettingsPresentation) { self.model = model; host = NSHostingController(rootView: SettingsDetail(model: model)); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
     override func loadView() {
-        view = NSView(); view.clipsToBounds = true
+        view = NSView(); view.wantsLayer = true; view.clipsToBounds = true
+        if #available(macOS 13.3, *) { host.safeAreaRegions = [] }
         addChild(host); host.view.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(host.view)
         NSLayoutConstraint.activate([host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor), host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
     }
     func install(in window: NSWindow) {
         guard let guide = window.contentLayoutGuide as? NSLayoutGuide else { return }
-        host.view.topAnchor.constraint(equalTo: guide.topAnchor).isActive = true
-        let header = NSView(); header.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(header)
+        host.view.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+        header.material = .titlebar
+        header.blendingMode = .withinWindow
+        header.state = .followsWindowActiveState
+        header.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(header)
         heading.font = .systemFont(ofSize: 17, weight: .bold)
         heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
         NSLayoutConstraint.activate([
@@ -26,6 +32,11 @@ final class SettingsContentController: NSViewController {
             heading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             heading.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -20)
         ])
+    }
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let height = header.bounds.height
+        if abs(model.contentTopInset - height) > 0.5 { model.contentTopInset = height }
     }
 }
 
@@ -180,14 +191,20 @@ final class SettingsScroller: NSScroller {
 /// Resolve the enclosing public NSScrollView from a marker inside SwiftUI scroll content.
 /// No private class names, method swizzling or periodic hierarchy scans.
 struct SettingsScrollTrack: NSViewRepresentable {
+    var extendsUnderTitlebar = false
     func makeNSView(context: Context) -> Marker { Marker() }
-    func updateNSView(_ view: Marker, context: Context) { view.installWhenAttached() }
+    func updateNSView(_ view: Marker, context: Context) { view.extendsUnderTitlebar = extendsUnderTitlebar; view.installWhenAttached() }
     final class Marker: NSView {
+        var extendsUnderTitlebar = false
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); installWhenAttached() }
         func installWhenAttached() {
             DispatchQueue.main.async { [weak self] in
-                guard let scroll = self?.enclosingScrollView,
-                      let original = scroll.verticalScroller,
+                guard let self, let scroll = self.enclosingScrollView else { return }
+                if self.extendsUnderTitlebar {
+                    scroll.automaticallyAdjustsContentInsets = false
+                    scroll.contentInsets = NSEdgeInsetsZero
+                }
+                guard let original = scroll.verticalScroller,
                       !(original is SettingsScroller) else { return }
                 let replacement = SettingsScroller(frame: original.frame)
                 replacement.controlSize = original.controlSize
