@@ -71,7 +71,7 @@ final class SystemSettingsController: NSSplitViewController {
         let enabled = UserDefaults.standard.object(forKey: "sidebarTransparency") as? Bool ?? true
         let useDesktop = enabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if useDesktop && desktopSidebar == nil {
-            let background = NSVisualEffectView()
+            let background = SettingsMaterialView()
             background.material = .sidebar
             background.blendingMode = .behindWindow
             background.state = .followsWindowActiveState

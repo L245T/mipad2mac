@@ -2,11 +2,34 @@ import AppKit
 import SwiftUI
 import MiPadCore
 
+/// Lighten only the material mask; labels and controls retain full opacity.
+/// Public AppKit materials do not expose a configurable blur radius.
+final class SettingsMaterialView: NSVisualEffectView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(updateCoverage), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        updateCoverage()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func updateCoverage() {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency else {
+            maskImage = nil
+            return
+        }
+        maskImage = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
+            NSColor.white.withAlphaComponent(0.88).setFill()
+            NSBezierPath(rect: rect).fill()
+            return true
+        }
+    }
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+}
+
 /// Scroll content behind a native frosted titlebar, with a matching initial inset.
 final class SettingsContentController: NSViewController {
     let host: NSHostingController<SettingsDetail>
     let heading = NSTextField(labelWithString: "控制")
-    private let header = NSVisualEffectView()
+    private let header = SettingsMaterialView()
     private let model: SettingsPresentation
     init(model: SettingsPresentation) { self.model = model; host = NSHostingController(rootView: SettingsDetail(model: model)); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
