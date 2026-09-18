@@ -168,10 +168,17 @@ struct SettingsDetail: View {
                             .labelsHidden().accessibilityLabel("长按时间，秒")
                     }
                 }.disabled(!app.output.longPress.enabled)
-                SettingsPicker("右键触发灵敏度过滤", selection: Binding(get: { app.output.longPress.jitterFilter }, set: { value in model.act { app.output.changeLongPress { $0.jitterFilter = value } } })) {
-                    ForEach(LongPressJitterFilter.allCases, id: \.self) { Text($0.title).tag($0) }
-                }.disabled(!app.output.longPress.enabled)
-                settingDescription("档位越高，越能容忍长按时的笔尖抖动，开始拖动前需移动更远；无表示不容忍位移。默认中，设置自动保存。")
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 12) {
+                        SettingsPicker("长按防抖", selection: Binding(get: { app.output.longPress.jitterFilter }, set: { value in model.act { app.output.changeLongPress { $0.jitterFilter = value } } })) {
+                            ForEach(LongPressJitterFilter.allCases, id: \.self) {
+                                Text($0 == .medium ? "中（默认）" : $0.title).tag($0)
+                            }
+                        }.disabled(!app.output.longPress.enabled)
+                        ExplanationButton(text: "过滤长按时的笔尖抖动，不改变长按等待时间。\n\n中为默认档位，保持原有手感。“无”不容忍实际位移，但笔尖完全静止时仍可触发长按右键。\n\n设置自动保存；绘画排除名单中的应用不受此设置影响。", label: "长按防抖说明")
+                    }
+                    settingDescription("档位越高，越能容忍笔尖抖动；开始拖动也需移动更远。")
+                }
                 LabeledContent("虚拟按键") { Text("研发中").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
             } header: { Text("笔输入") } footer: { EmptyView() }
             SettingsSection {
