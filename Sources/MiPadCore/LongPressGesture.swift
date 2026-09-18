@@ -9,6 +9,7 @@ public struct LongPressGesture {
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
     public private(set) var deadline: TimeInterval?
+    public var hasScheduledClick: Bool { deadline != nil }
     public var isIdle: Bool { phase == .idle }
     public var isPending: Bool { phase == .pending }
     public init() {}
@@ -18,7 +19,10 @@ public struct LongPressGesture {
         let contact = sample.touching && sample.inRange && !sample.eraser
         if phase == .completed {
             // The context menu owns subsequent motion. Never click or drag again until a new contact.
-            if !contact { phase = .idle }
+            if !contact { phase = .idle; deadline = nil }
+            if !sample.inRange || !sample.positionValid || sample.eraser ||
+                hypot(mapping.point(x: sample.x, y: sample.y).x - origin.x,
+                      mapping.point(x: sample.x, y: sample.y).y - origin.y) >= 4 { deadline = nil }
             guard sample.inRange && sample.positionValid && !sample.eraser else { return [] }
             return [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))]
         }
@@ -66,9 +70,14 @@ public struct LongPressGesture {
     }
 
     /// Called by a separate timer, independent of diagnostics refresh and report frequency.
-    public mutating func fire(now: TimeInterval) -> [PointerEvent] {
-        guard phase == .pending, let deadline, now >= deadline else { return [] }
-        phase = .completed; self.deadline = nil
+    public mutating func fire(now: TimeInterval, compatibility: Bool = false) -> [PointerEvent] {
+        guard let deadline, now >= deadline else { return [] }
+        if phase == .pending {
+            phase = .completed
+            self.deadline = compatibility ? now + 0.1 : nil
+        } else if phase == .completed {
+            self.deadline = nil
+        } else { return [] }
         return [PointerEvent(action: .rightDown, point: origin), PointerEvent(action: .rightUp, point: origin)]
     }
 
@@ -107,6 +116,18 @@ public final class LongPressPreferences {
     public var exclusions: [String: String] {
         get { defaults.dictionary(forKey: "penLongPressExcludedApps") as? [String: String] ?? ["com.adobe.Photoshop": "Adobe Photoshop"] }
         set { defaults.set(newValue, forKey: "penLongPressExcludedApps") }
+    }
+    public var compatibilityEnabled: Bool {
+        get { defaults.object(forKey: "penRightClickCompatibilityEnabled") as? Bool ?? false }
+        set { defaults.set(newValue, forKey: "penRightClickCompatibilityEnabled") }
+    }
+    public var compatibilityApplications: [String: String] {
+        get { defaults.dictionary(forKey: "penRightClickCompatibilityApps") as? [String: String] ?? [:] }
+        set { defaults.set(newValue, forKey: "penRightClickCompatibilityApps") }
+    }
+    public func usesCompatibility(for bundleID: String) -> Bool {
+        enabled && compatibilityEnabled && !excludes(bundleID) &&
+            compatibilityApplications.keys.contains { $0.caseInsensitiveCompare(bundleID) == .orderedSame }
     }
     public func excludes(_ bundleID: String) -> Bool {
         exclusions.keys.contains { key in

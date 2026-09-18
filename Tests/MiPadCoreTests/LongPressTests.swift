@@ -134,3 +134,68 @@ private func feed(_ g: inout LongPressGesture, _ s: Sample, time: Double = 0, en
     _ = feed(&g, pen(), time: 4)
     #expect(feed(&g, pen(down: false), time: 4.1).map(\.action) == [.down, .up])
 }
+
+@Test func compatibilitySendsExactlyTwoCompleteRightClicks() {
+    var g = LongPressGesture()
+    _ = feed(&g, pen())
+    #expect(g.fire(now: 0.6, compatibility: true).map(\.action) == [.rightDown, .rightUp])
+    #expect(g.hasScheduledClick)
+    #expect(g.fire(now: 0.69, compatibility: true).isEmpty)
+    #expect(feed(&g, pen(0.501), time: 0.695).map(\.action) == [.move])
+    #expect(g.fire(now: 0.71, compatibility: true).map(\.action) == [.rightDown, .rightUp])
+    #expect(!g.hasScheduledClick)
+    #expect(g.fire(now: 3, compatibility: true).isEmpty)
+    #expect(feed(&g, pen(down: false), time: 4).allSatisfy { $0.action == .move })
+}
+
+@Test func secondCompatibilityClickCancelsOnLiftMovementInvalidInputAndRelease() {
+    for s in [pen(down: false), pen(0.51), pen(valid: false), pen(inRange: false)] {
+        var g = LongPressGesture(); _ = feed(&g, pen())
+        _ = g.fire(now: 0.6, compatibility: true)
+        _ = feed(&g, s, time: 0.65)
+        #expect(g.fire(now: 0.8, compatibility: true).isEmpty)
+    }
+    var g = LongPressGesture(); _ = feed(&g, pen())
+    _ = g.fire(now: 0.6, compatibility: true)
+    #expect(g.cancel().isEmpty)
+    #expect(g.fire(now: 1, compatibility: true).isEmpty)
+    #expect(feed(&g, pen(), time: 2).isEmpty)
+}
+
+@Test func defaultClickAndNextContactDoNotInheritSecondClick() {
+    var g = LongPressGesture(); _ = feed(&g, pen())
+    _ = g.fire(now: 0.6)
+    #expect(!g.hasScheduledClick)
+    #expect(g.fire(now: 0.8).isEmpty)
+    _ = feed(&g, pen(down: false)); _ = feed(&g, pen(), time: 1)
+    _ = g.fire(now: 1.6, compatibility: true)
+    _ = feed(&g, pen(down: false), time: 1.61)
+    _ = feed(&g, pen(), time: 1.62)
+    #expect(g.fire(now: 1.8, compatibility: true).isEmpty)
+}
+
+@Test func compatibilityPreferencesPersistAndDrawingExclusionWins() throws {
+    let suite = "CompatibilityTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let p = LongPressPreferences(defaults: defaults)
+    #expect(!p.compatibilityEnabled); #expect(p.compatibilityApplications.isEmpty)
+    p.compatibilityApplications = ["com.google.Chrome": "Google Chrome", "com.adobe.Photoshop": "Photoshop"]
+    #expect(!p.usesCompatibility(for: "com.google.Chrome"))
+    p.compatibilityEnabled = true
+    #expect(p.usesCompatibility(for: "com.google.Chrome"))
+    #expect(!p.usesCompatibility(for: "com.adobe.Photoshop"))
+    #expect(!p.usesCompatibility(for: "com.apple.finder"))
+    let restored = LongPressPreferences(defaults: try #require(UserDefaults(suiteName: suite)))
+    #expect(restored.compatibilityEnabled)
+    #expect(restored.compatibilityApplications == p.compatibilityApplications)
+    restored.compatibilityEnabled = false
+    #expect(restored.compatibilityApplications.count == 2)
+    restored.compatibilityEnabled = true
+    #expect(restored.usesCompatibility(for: "com.google.Chrome"))
+    restored.enabled = false
+    #expect(!restored.usesCompatibility(for: "com.google.Chrome"))
+    defaults.set("invalid", forKey: "penRightClickCompatibilityEnabled")
+    defaults.set([1, 2], forKey: "penRightClickCompatibilityApps")
+    #expect(!p.compatibilityEnabled); #expect(p.compatibilityApplications.isEmpty)
+}

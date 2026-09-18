@@ -17,6 +17,7 @@ final class PointerOutput {
     let longPress = LongPressPreferences()
     private var longPressTimer: Timer?
     private var applicationObserver: NSObjectProtocol?
+    private var compatibilityContact = false
     private var candidateTarget: pid_t?
     private var candidateFrontmost: pid_t?
     private var contactSample: Sample?
@@ -31,7 +32,7 @@ final class PointerOutput {
         applicationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            guard let self, self.gesture.isPending else { return }
+            guard let self, self.gesture.hasScheduledClick else { return }
             self.longPressDiagnostic("长按取消：前台应用切换")
             self.release()
         }
@@ -64,21 +65,22 @@ final class PointerOutput {
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
         release(); edit(longPress)
     }
-    func addExcludedApplication() {
+    func addExcludedApplication(compatibility: Bool = false) {
         release()
         let panel = NSOpenPanel()
-        panel.title = "选择不使用长按右键的绘画应用"
+        panel.title = compatibility ? "选择使用右键兼容模式的应用" : "选择不使用长按右键的绘画应用"
         panel.allowedContentTypes = [.applicationBundle]
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         guard panel.runModal() == .OK, let url = panel.url,
               let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return }
         changeLongPress { settings in
-            var apps = settings.exclusions
+            var apps = compatibility ? settings.compatibilityApplications : settings.exclusions
             apps[id] = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
                 ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
                 ?? url.deletingPathExtension().lastPathComponent
-            settings.exclusions = apps
+            if compatibility { settings.compatibilityApplications = apps }
+            else { settings.exclusions = apps }
         }
     }
     func resetConnection() { release(); gesture.reset() }
@@ -87,15 +89,15 @@ final class PointerOutput {
         let timer = Timer(timeInterval: max(0.001, deadline - ProcessInfo.processInfo.systemUptime), repeats: false) { [weak self] _ in
             guard let self else { return }
             self.longPressTimer = nil
-            guard self.gesture.isPending else { return }
+            guard self.gesture.hasScheduledClick else { return }
             guard let candidateTarget = self.candidateTarget,
                   self.target(at: self.pressLocation)?.processIdentifier == candidateTarget,
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == self.candidateFrontmost else {
                 self.longPressDiagnostic("长按取消：到时目标应用或前台应用已变化/无法识别")
                 self.release(); return
             }
-            self.emit(self.gesture.fire(now: ProcessInfo.processInfo.systemUptime))
-            if self.gesture.isPending { self.scheduleLongPress() }
+            self.emit(self.gesture.fire(now: ProcessInfo.processInfo.systemUptime, compatibility: self.compatibilityContact))
+            if self.gesture.hasScheduledClick { self.scheduleLongPress() }
         }
         longPressTimer = timer
         RunLoop.main.add(timer, forMode: .common)
@@ -143,6 +145,7 @@ final class PointerOutput {
             candidateFrontmost = frontmost?.processIdentifier
             deferredContact = longPress.enabled && !frontmostExcluded
                 && (targetApp?.bundleIdentifier.map { !longPress.excludes($0) } ?? false)
+            compatibilityContact = deferredContact && (targetApp?.bundleIdentifier.map { longPress.usesCompatibility(for: $0) } ?? false)
             if longPress.enabled {
                 longPressDiagnostic("长按判定：目标 \(targetApp?.bundleIdentifier ?? "未知")，前台 \(frontmost?.bundleIdentifier ?? "未知")，\(deferredContact ? "开始计时" : "即时左键（排除或目标未识别）")")
             }
@@ -159,7 +162,7 @@ final class PointerOutput {
                 : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围"))
         }
         emit(events)
-        if gesture.isPending { scheduleLongPress() }
+        if gesture.hasScheduledClick { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
         if !contact { contactSample = nil }
         if tabletEnabled && (!sample.inRange || !sample.positionValid || sample.eraser) && inProximity {
