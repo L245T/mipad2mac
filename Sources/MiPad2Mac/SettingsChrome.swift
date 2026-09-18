@@ -205,38 +205,44 @@ struct SettingsScrollTrack: NSViewRepresentable {
 /// Let SwiftUI own native tracking, integer stepping, geometry and Liquid Glass feedback.
 struct SettingsIntegerSlider: View {
     @Binding var value: Double
+    @Environment(\.isEnabled) private var isEnabled
     var body: some View {
-        Group {
-            if #available(macOS 26, *) {
-                Slider(value: $value, in: 0...18, step: 1) { Text("长按防抖") } tick: { value in
-                    // Named positions are drawn as text on the same baseline as the remaining ticks.
-                    LongPressJitterFilter.landmarks.contains(where: { $0.tolerance == value }) ? nil : SliderTick(value)
+        VStack(spacing: 4) {
+            Slider(value: Binding(get: { value }, set: { value = min(18, max(0, $0.rounded())) }), in: 0...18) { Text("长按防抖") }
+                .accessibilityAdjustableAction { direction in
+                    guard isEnabled else { return }
+                    switch direction {
+                    case .increment: value = min(18, value + 1)
+                    case .decrement: value = max(0, value - 1)
+                    @unknown default: break
+                    }
                 }
-                .overlay(alignment: .bottom) { tickLabels(showDots: false) }
-                .padding(.bottom, 7)
-            } else {
-                VStack(spacing: 0) {
-                    Slider(value: $value, in: 0...18, step: 1) { Text("长按防抖") }
-                    tickLabels(showDots: true).frame(height: 16)
+                .onMoveCommand { direction in
+                    guard isEnabled else { return }
+                    switch direction {
+                    case .right, .up: value = min(18, value + 1)
+                    case .left, .down: value = max(0, value - 1)
+                    default: break
+                    }
                 }
-            }
+            tickLabels.frame(height: 16)
         }
         .labelsHidden()
         .controlSize(.regular)
         .accessibilityValue("\(Int(value))，范围0到18")
     }
-    private func tickLabels(showDots: Bool) -> some View {
+    private var tickLabels: some View {
         GeometryReader { geometry in
             ForEach(0...18, id: \.self) { index in
                 Group {
                     if let landmark = LongPressJitterFilter.landmarks.first(where: { $0.tolerance == Double(index) }) {
                         Text(landmark.title).font(.caption).fixedSize()
-                    } else if showDots {
+                    } else {
                         Circle().frame(width: 2, height: 2)
                     }
                 }.foregroundStyle(.secondary)
                     .position(x: 10 + (geometry.size.width - 20) * Double(index) / 18,
-                              y: showDots ? 8 : geometry.size.height - 2)
+                              y: 8)
             }
         }.allowsHitTesting(false).accessibilityHidden(true)
     }
