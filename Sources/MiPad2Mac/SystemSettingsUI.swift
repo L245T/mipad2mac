@@ -30,7 +30,7 @@ final class SettingsPresentation: ObservableObject {
 final class SystemSettingsController: NSSplitViewController {
     let model: SettingsPresentation
     private var opaqueSidebar: NSView?
-    private var desktopSidebar: NSVisualEffectView?
+    private var desktopSidebar: NSView?
     static let names = ["控制", "权限检查", "测试", "设置", "关于"]
     init(app: AppDelegate) { model = SettingsPresentation(app); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
@@ -71,10 +71,7 @@ final class SystemSettingsController: NSSplitViewController {
         let enabled = UserDefaults.standard.object(forKey: "sidebarTransparency") as? Bool ?? true
         let useDesktop = enabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if useDesktop && desktopSidebar == nil {
-            let background = SettingsMaterialView()
-            background.material = .sidebar
-            background.blendingMode = .behindWindow
-            background.state = .followsWindowActiveState
+            let background = SettingsGlassSurface(fadesBottom: false)
             background.frame = sidebar.bounds
             background.autoresizingMask = [.width, .height]
             sidebar.addSubview(background, positioned: .below, relativeTo: nil)

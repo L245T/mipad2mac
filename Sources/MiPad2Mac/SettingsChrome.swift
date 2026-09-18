@@ -2,26 +2,52 @@ import AppKit
 import SwiftUI
 import MiPadCore
 
-/// Lighten only the material mask; labels and controls retain full opacity.
-/// Public AppKit materials do not expose a configurable blur radius.
-final class SettingsMaterialView: NSVisualEffectView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(updateCoverage), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
-        updateCoverage()
+/// Keep native glass refraction, while moving its perimeter outside the visible header.
+/// Only the background fades; the title and its accessibility remain unaffected.
+final class SettingsGlassSurface: NSView {
+    private let effect: NSView
+    private let fade = CAGradientLayer()
+    private let fadesBottom: Bool
+    init(fadesBottom: Bool = true) {
+        self.fadesBottom = fadesBottom
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.cornerRadius = 0
+            glass.contentView = NSView()
+            effect = glass
+        } else {
+            let material = NSVisualEffectView()
+            material.material = fadesBottom ? .titlebar : .sidebar
+            material.blendingMode = fadesBottom ? .withinWindow : .behindWindow
+            material.state = .followsWindowActiveState
+            effect = material
+        }
+        super.init(frame: .zero)
+        wantsLayer = true
+        clipsToBounds = true
+        addSubview(effect)
+        fade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+        fade.locations = [0, 0.72, 1]
+        fade.startPoint = CGPoint(x: 0.5, y: 1)
+        fade.endPoint = CGPoint(x: 0.5, y: 0)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(updateAccessibility), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        updateAccessibility()
     }
     required init?(coder: NSCoder) { fatalError() }
-    @objc private func updateCoverage() {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency else {
-            maskImage = nil
-            return
-        }
-        maskImage = NSImage(size: NSSize(width: 1, height: 1), flipped: false) { rect in
-            NSColor.white.withAlphaComponent(0.88).setFill()
-            NSBezierPath(rect: rect).fill()
-            return true
-        }
+    @objc private func updateAccessibility() {
+        layer?.mask = fadesBottom && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? fade : nil
+        needsLayout = true
     }
+    override func layout() {
+        super.layout()
+        effect.frame = bounds.insetBy(dx: -20, dy: -20)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fade.frame = bounds
+        CATransaction.commit()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
     deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
 }
 
@@ -43,29 +69,7 @@ final class SettingsContentController: NSViewController {
         guard let guide = window.contentLayoutGuide as? NSLayoutGuide else { return }
         host.view.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
         header.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(header)
-        let titleContent = NSView()
-        let surface: NSView
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.style = .regular
-            glass.cornerRadius = 0
-            glass.contentView = titleContent
-            surface = glass
-        } else {
-            let material = SettingsMaterialView()
-            material.material = .titlebar
-            material.blendingMode = .withinWindow
-            material.state = .followsWindowActiveState
-            titleContent.translatesAutoresizingMaskIntoConstraints = false
-            material.addSubview(titleContent)
-            NSLayoutConstraint.activate([
-                titleContent.leadingAnchor.constraint(equalTo: material.leadingAnchor),
-                titleContent.trailingAnchor.constraint(equalTo: material.trailingAnchor),
-                titleContent.topAnchor.constraint(equalTo: material.topAnchor),
-                titleContent.bottomAnchor.constraint(equalTo: material.bottomAnchor)
-            ])
-            surface = material
-        }
+        let surface = SettingsGlassSurface()
         surface.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(surface)
         NSLayoutConstraint.activate([
@@ -75,7 +79,7 @@ final class SettingsContentController: NSViewController {
             surface.bottomAnchor.constraint(equalTo: header.bottomAnchor)
         ])
         heading.font = .systemFont(ofSize: 17, weight: .bold)
-        heading.translatesAutoresizingMaskIntoConstraints = false; titleContent.addSubview(heading)
+        heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.topAnchor), header.bottomAnchor.constraint(equalTo: guide.topAnchor),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
