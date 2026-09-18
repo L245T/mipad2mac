@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MiPadCore
 
 /// Keep scrolling content entirely below the system title/toolbar, even at its top edge.
 final class SettingsContentController: NSViewController {
@@ -205,9 +206,38 @@ struct SettingsScrollTrack: NSViewRepresentable {
 struct SettingsIntegerSlider: View {
     @Binding var value: Double
     var body: some View {
-        Slider(value: $value, in: 0...18, step: 1) { Text("长按防抖") }
-            .labelsHidden()
-            .controlSize(.regular)
-            .accessibilityValue("\(Int(value))，范围0到18")
+        Group {
+            if #available(macOS 26, *) {
+                Slider(value: $value, in: 0...18, step: 1) { Text("长按防抖") } tick: { value in
+                    // Named positions are drawn as text on the same baseline as the remaining ticks.
+                    LongPressJitterFilter.landmarks.contains(where: { $0.tolerance == value }) ? nil : SliderTick(value)
+                }
+                .overlay(alignment: .bottom) { tickLabels(showDots: false) }
+                .padding(.bottom, 7)
+            } else {
+                VStack(spacing: 0) {
+                    Slider(value: $value, in: 0...18, step: 1) { Text("长按防抖") }
+                    tickLabels(showDots: true).frame(height: 16)
+                }
+            }
+        }
+        .labelsHidden()
+        .controlSize(.regular)
+        .accessibilityValue("\(Int(value))，范围0到18")
+    }
+    private func tickLabels(showDots: Bool) -> some View {
+        GeometryReader { geometry in
+            ForEach(0...18, id: \.self) { index in
+                Group {
+                    if let landmark = LongPressJitterFilter.landmarks.first(where: { $0.tolerance == Double(index) }) {
+                        Text(landmark.title).font(.caption).fixedSize()
+                    } else if showDots {
+                        Circle().frame(width: 2, height: 2)
+                    }
+                }.foregroundStyle(.secondary)
+                    .position(x: 10 + (geometry.size.width - 20) * Double(index) / 18,
+                              y: showDots ? 8 : geometry.size.height - 2)
+            }
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }

@@ -178,17 +178,6 @@ struct SettingsDetail: View {
                     SettingsIntegerSlider(value: Binding(get: { app.output.longPress.jitterFilter.tolerance }, set: { value in
                         model.act { app.output.changeLongPress { $0.jitterFilter = LongPressJitterFilter(tolerance: value) } }
                     })).disabled(!app.output.longPress.enabled)
-                    GeometryReader { geometry in
-                        ForEach(LongPressJitterFilter.landmarks, id: \.self) { level in
-                            VStack(spacing: 3) {
-                                Circle().fill(.tertiary).frame(width: 3, height: 3)
-                                Text(level.title).font(.caption)
-                                Text("\(Int(level.tolerance))").font(.caption2).monospacedDigit()
-                            }.foregroundStyle(.secondary).frame(width: 36)
-                                .position(x: 8 + (geometry.size.width - 16) * level.tolerance / 18, y: 22)
-                                .accessibilityHidden(true)
-                        }
-                    }.frame(height: 44)
                     settingDescription("数值越大，越能容忍笔尖抖动；开始拖动也需移动更远。")
                 }
                 LabeledContent("虚拟按键") { Text("研发中").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
