@@ -29,7 +29,7 @@ final class SettingsMaterialView: NSVisualEffectView {
 final class SettingsContentController: NSViewController {
     let host: NSHostingController<SettingsDetail>
     let heading = NSTextField(labelWithString: "控制")
-    private let header = SettingsMaterialView()
+    private let header = NSView()
     private let model: SettingsPresentation
     init(model: SettingsPresentation) { self.model = model; host = NSHostingController(rootView: SettingsDetail(model: model)); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
@@ -42,12 +42,40 @@ final class SettingsContentController: NSViewController {
     func install(in window: NSWindow) {
         guard let guide = window.contentLayoutGuide as? NSLayoutGuide else { return }
         host.view.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
-        header.material = .titlebar
-        header.blendingMode = .withinWindow
-        header.state = .followsWindowActiveState
         header.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(header)
+        let titleContent = NSView()
+        let surface: NSView
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.cornerRadius = 0
+            glass.contentView = titleContent
+            surface = glass
+        } else {
+            let material = SettingsMaterialView()
+            material.material = .titlebar
+            material.blendingMode = .withinWindow
+            material.state = .followsWindowActiveState
+            titleContent.translatesAutoresizingMaskIntoConstraints = false
+            material.addSubview(titleContent)
+            NSLayoutConstraint.activate([
+                titleContent.leadingAnchor.constraint(equalTo: material.leadingAnchor),
+                titleContent.trailingAnchor.constraint(equalTo: material.trailingAnchor),
+                titleContent.topAnchor.constraint(equalTo: material.topAnchor),
+                titleContent.bottomAnchor.constraint(equalTo: material.bottomAnchor)
+            ])
+            surface = material
+        }
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(surface)
+        NSLayoutConstraint.activate([
+            surface.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: header.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: header.bottomAnchor)
+        ])
         heading.font = .systemFont(ofSize: 17, weight: .bold)
-        heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
+        heading.translatesAutoresizingMaskIntoConstraints = false; titleContent.addSubview(heading)
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.topAnchor), header.bottomAnchor.constraint(equalTo: guide.topAnchor),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor),
