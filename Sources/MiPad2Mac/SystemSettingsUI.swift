@@ -38,7 +38,7 @@ final class SystemSettingsController: NSSplitViewController {
         splitView.isVertical = true
         let sidebarController = SettingsNavigation(model: model)
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController)
-        sidebar.canCollapse = false; sidebar.minimumThickness = 220; sidebar.maximumThickness = 220
+        sidebar.canCollapse = false; sidebar.minimumThickness = 180; sidebar.maximumThickness = 180
         let detail = NSSplitViewItem(viewController: SettingsContentController(model: model))
         detail.minimumThickness = 480
         addSplitViewItem(sidebar); addSplitViewItem(detail)

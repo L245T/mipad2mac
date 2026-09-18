@@ -4,7 +4,7 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 
 ## 结构与布局
 
-- 主窗口使用 NSSplitViewController、原生侧栏和统一工具栏标题。侧栏固定 220 pt，不支持收起，不重复展示应用 Logo 与名称。品牌信息保留在关于页。
+- 主窗口使用 NSSplitViewController、原生侧栏和统一工具栏标题。侧栏固定 180 pt，不支持收起，不重复展示应用 Logo 与名称。品牌信息保留在关于页。
 - 侧栏使用 AppKit NSTableView 和 SF Symbols；控制使用 pencil。选中行采用系统 controlAccentColor，失焦采用 unemphasizedSelectedContentBackgroundColor；圆角 9 pt、行高 32 pt，保留原生键盘导航与无障碍语义。
 - 五个页面共享 SettingsSection 分组、LabeledContent、原生菜单和 NSSwitch。右侧承载视图约束到 NSWindow.contentLayoutGuide 下方并裁切，滚动内容不会穿过标题栏；滚动条由系统 ScrollView 管理，遵循系统显示偏好。常驻竖向轨道使用 NSScroller 公开绘制接口呈现胶囊圆角，滑块及交互仍由 AppKit 处理；自动隐藏样式继续使用系统绘制。
 - 页面标题与正文标签共用右侧起点 30 pt（20 pt 外边距 + 10 pt 行内边距）。控制状态与连接操作统一放在首组，成功状态不再在底部重复；等待或失败时在首组保留原因。
@@ -41,7 +41,7 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 
 ## 页面与尺寸
 
-默认窗口 780×700 pt，最小 720×580 pt；侧栏 220 pt、正文最小 480 pt 是当前工程参数，不是 Apple 强制规范。正文四周 20 pt；组间 22 pt；组内行垂直内边距 9 pt、水平 10 pt；分组圆角 12 pt。这些是依据用户参考图确定的项目参数，不是 Apple 公布的强制值。下拉菜单按内容宽度收缩、右对齐；开关采用 NSSwitch.regular 的固有尺寸，不拉伸或缩放。
+默认窗口 780×700 pt，最小 720×580 pt；侧栏 180 pt、正文最小 480 pt 是当前工程参数，不是 Apple 强制规范。正文四周 20 pt；组间 22 pt；组内行垂直内边距 9 pt、水平 10 pt；分组圆角 12 pt。这些是依据用户参考图确定的项目参数，不是 Apple 公布的强制值。下拉菜单按内容宽度收缩、右对齐；开关采用 NSSwitch.regular 的固有尺寸，不拉伸或缩放。
 
 | 页面 | 内容 |
 | --- | --- |
