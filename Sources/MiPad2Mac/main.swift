@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let controlLabel = NSTextField(wrappingLabelWithString: "MiPad2Mac 控制未启用：目标屏幕映射不生效，macOS 仍可能响应触控笔。")
     let screenPicker = NSPopUpButton()
     let rotationPicker = NSPopUpButton()
+    let rotationPreferences = DisplayRotationPreferences()
     let flipX = NSButton(checkboxWithTitle: "水平翻转", target: nil, action: nil)
     let flipY = NSButton(checkboxWithTitle: "垂直翻转", target: nil, action: nil)
     let enableButton = NSButton(title: "启用鼠标控制", target: nil, action: nil)
@@ -118,7 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         packetLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         screenPicker.target = self; screenPicker.action = #selector(mappingChanged)
         screenPicker.setAccessibilityLabel("目标显示器")
-        rotationPicker.addItems(withTitles: ["0°", "90°", "180°", "270°"])
+        rotationPicker.addItems(withTitles: DisplayRotationMode.allCases.map(\.title))
+        rotationPicker.selectItem(at: DisplayRotationMode.allCases.firstIndex(of: rotationPreferences.mode) ?? 0)
         rotationPicker.target = self; rotationPicker.action = #selector(mappingChanged)
         rotationPicker.setAccessibilityLabel("旋转方向")
         for control in [flipX, flipY] { control.target = self; control.action = #selector(mappingChanged) }
@@ -448,7 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let id = displays[index]
         guard CGDisplayIsActive(id) != 0 else { statusLabel.stringValue = "目标显示器当前不可用，等待重新连接。"; return }
         guard reader.setExclusive(true) else { return }
-        output.mapping = Mapping(bounds: CGDisplayBounds(id), rotation: rotationPicker.indexOfSelectedItem * 90,
+        output.mapping = Mapping(bounds: CGDisplayBounds(id), rotation: rotationPreferences.mode.angle(systemAngle: CGDisplayRotation(id)),
                                  flipX: flipX.state == .on, flipY: flipY.state == .on)
         enabled = true
         enableButton.title = "暂停鼠标控制"
@@ -470,12 +472,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc func pause() { automaticNotificationPending = false; automaticControl.pause(); disable(); statusLabel.stringValue = "鼠标控制已暂停" }
     @objc func mappingChanged() {
+        let selection = rotationPicker.indexOfSelectedItem
+        if DisplayRotationMode.allCases.indices.contains(selection) {
+            rotationPreferences.mode = DisplayRotationMode.allCases[selection]
+        }
         guard automaticControl.requested else { return }
         let index = screenPicker.indexOfSelectedItem - 1
         if enabled, displays.indices.contains(index), CGDisplayIsActive(displays[index]) != 0 {
             // End the old stroke/proximity before changing coordinate systems; keep the pen seized.
             output.release()
-            output.mapping = Mapping(bounds: CGDisplayBounds(displays[index]), rotation: rotationPicker.indexOfSelectedItem * 90,
+            output.mapping = Mapping(bounds: CGDisplayBounds(displays[index]), rotation: rotationPreferences.mode.angle(systemAngle: CGDisplayRotation(displays[index])),
                                      flipX: flipX.state == .on, flipY: flipY.state == .on)
             statusLabel.stringValue = "映射已更新，MiPad2Mac 控制继续。"
         } else {

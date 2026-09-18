@@ -142,11 +142,11 @@ struct SettingsDetail: View {
                     ForEach(Array(app.screenPicker.itemTitles.enumerated()), id: \.offset) { Text($0.element).tag($0.offset) }
                 }
                 SettingsPicker("旋转方向", selection: Binding(get: { app.rotationPicker.indexOfSelectedItem }, set: { value in model.act { app.rotationPicker.selectItem(at: value); app.mappingChanged() } })) {
-                    ForEach(0..<4, id: \.self) { Text("\($0 * 90)°").tag($0) }
+                    ForEach(Array(app.rotationPicker.itemTitles.enumerated()), id: \.offset) { Text($0.element).tag($0.offset) }
                 }
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
-            } header: { Text("显示器") } footer: { footerNote("修改映射会结束当前笔画，处理方式保持不变。显示的是逻辑分辨率。") }
+            } header: { Text("显示器") } footer: { footerNote("“跟随系统”自动适配目标显示器的旋转，也可手动指定角度；选择自动保存。修改映射会结束当前笔画，处理方式保持不变。显示的是逻辑分辨率。") }
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
