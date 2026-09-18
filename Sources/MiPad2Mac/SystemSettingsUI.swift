@@ -81,7 +81,7 @@ final class SystemSettingsController: NSSplitViewController {
 struct SettingsDetail: View {
     @ObservedObject var model: SettingsPresentation
     var permissionsOnly = false
-    @StateObject private var longPressHelpState = ExplanationState()
+    @StateObject private var longPressHelpState = LongPressHelpState()
     private var app: AppDelegate { model.app }
     var body: some View {
         ScrollView {
@@ -174,45 +174,108 @@ struct SettingsDetail: View {
         }
     }
     private var longPressHelp: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("长按右键无法触发").font(.title2.bold())
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("长按右键帮助").font(.title2.bold())
+                Text("检查触发条件，或为鼠标手势扩展设置兼容选项。")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("帮助内容", selection: $longPressHelpState.section) {
+                    Text("排查步骤").tag(0)
+                    Text("兼容设置").tag(1)
+                }.pickerStyle(.segmented).labelsHidden().padding(.top, 8)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("先确认 MiPad2Mac 控制和长按右键已开启。落笔后保持原位置，达到设定的长按时间；进入拖动后，本次接触不会再触发右键。")
-                    Text("Photoshop 等排除名单中的应用不启用长按右键，包括工具栏。这是为了保护绘画。")
-                    Text("桌面可以、浏览器不行时，请用鼠标右键或触控板双指点按作对照。CrxMouse 等手势扩展可能拦截第一次右键，要求再次右键才显示菜单。可在 Chrome 的扩展程序管理中临时停用相关扩展验证，或在扩展设置中关闭右键菜单拦截。")
-                    Divider()
-                    Toggle("兼容鼠标手势扩展", isOn: Binding(get: { app.output.longPress.compatibilityEnabled }, set: { value in model.act { app.output.changeLongPress { $0.compatibilityEnabled = value } } }))
-                    Text("开启后，在所选应用中长按会连续发送两次右键，适用于需要再次右键才显示菜单的鼠标手势扩展。")
-                        .foregroundStyle(.secondary)
-                    Text("注意：此设置也会影响通过本地文件路径打开的静态网页。未拦截右键的页面可能出现菜单关闭、重新弹出等异常；遇到此情况，请关闭兼容选项。")
-                        .fontWeight(.semibold)
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("所选应用").font(.headline)
-                        if app.output.longPress.compatibilityApplications.isEmpty {
-                            Text("尚未添加应用。添加后，兼容模式才会在该应用中生效。").foregroundStyle(.secondary)
+                    if longPressHelpState.section == 0 { longPressTroubleshooting }
+                    else { longPressCompatibility }
+                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            }.background(Color(nsColor: .textBackgroundColor))
+            Divider()
+            HStack {
+                if longPressHelpState.section == 1 {
+                    Text("设置自动保存").font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("完成") { longPressHelpState.shown = false }
+                    .keyboardShortcut(.defaultAction)
+            }.padding(.horizontal, 20).padding(.vertical, 14)
+        }
+        .frame(width: 560, height: 580)
+        .controlSize(.regular).toggleStyle(SettingsToggleStyle())
+        .onExitCommand { longPressHelpState.shown = false }
+    }
+    private var longPressTroubleshooting: some View {
+        Group {
+            SettingsSection("1. 检查触发条件") {
+                Text("先确认 MiPad2Mac 控制和长按右键已开启。落笔后保持原位置，达到设定的长按时间；进入拖动后，本次接触不会再触发右键。")
+                settingDescription("Photoshop 等绘画排除名单中的应用不启用长按右键，包括工具栏。这是为了保护绘画。")
+            }
+            SettingsSection("2. 检查浏览器扩展") {
+                Text("桌面可以、浏览器不行时，请用鼠标右键或触控板双指点按作对照。CrxMouse 等手势扩展可能拦截第一次右键，要求再次右键才显示菜单。")
+                settingDescription("可在 Chrome 的扩展程序管理中临时停用相关扩展验证，或在扩展设置中关闭右键菜单拦截。")
+                HStack {
+                    Text("需要保留扩展的拦截行为？").font(.callout)
+                    Spacer()
+                    Button("兼容设置…") { longPressHelpState.section = 1 }
+                }
+            }
+            SettingsSection("3. 仍然无法触发") {
+                Text("只有特定页面或区域无菜单时，目标可能没有菜单或网页自行处理了右键。")
+                settingDescription("到测试页临时开启监控与日志，复现一次并查看长按判定记录；排查后关闭监控。提交计数不代表目标已显示菜单。")
+            }
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+    private var longPressCompatibility: some View {
+        Group {
+            SettingsSection {
+                Toggle("兼容鼠标手势扩展", isOn: Binding(get: { app.output.longPress.compatibilityEnabled }, set: { value in
+                    model.act { app.output.changeLongPress { $0.compatibilityEnabled = value } }
+                }))
+            } footer: {
+                footerNote("开启后，在所选应用中长按会连续发送两次右键，适用于需要再次右键才显示菜单的鼠标手势扩展。")
+            }
+            SettingsSection {
+                if app.output.longPress.compatibilityApplications.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "app.dashed").font(.title2).foregroundStyle(.secondary).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("尚未添加应用")
+                            settingDescription("添加后，兼容模式才会在该应用中生效。")
                         }
-                        ForEach(app.output.longPress.compatibilityApplications.keys.sorted(), id: \.self) { id in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(app.output.longPress.compatibilityApplications[id] ?? id)
-                                    if app.output.longPress.excludes(id) { Text("已在绘画排除名单中，不触发长按").font(.caption).foregroundStyle(.secondary) }
-                                }
-                                Spacer()
-                                Button("移除") { model.act { app.output.changeLongPress { settings in
-                                    var apps = settings.compatibilityApplications; apps.removeValue(forKey: id); settings.compatibilityApplications = apps
-                                } } }.accessibilityLabel("移除兼容应用 \(app.output.longPress.compatibilityApplications[id] ?? id)")
+                    }.padding(.vertical, 4)
+                }
+                ForEach(app.output.longPress.compatibilityApplications.keys.sorted(), id: \.self) { id in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(app.output.longPress.compatibilityApplications[id] ?? id)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if app.output.longPress.excludes(id) {
+                                settingDescription("已在绘画排除名单中，不触发长按")
                             }
                         }
-                        Button("添加应用…") { model.act { app.output.addExcludedApplication(compatibility: true) } }
+                        Spacer(minLength: 8)
+                        Button("移除") { model.act { app.output.changeLongPress { settings in
+                            var apps = settings.compatibilityApplications; apps.removeValue(forKey: id); settings.compatibilityApplications = apps
+                        } } }
+                        .accessibilityLabel("移除兼容应用 \(app.output.longPress.compatibilityApplications[id] ?? id)")
                     }
-                    Text("设置自动保存。关闭兼容选项会保留所选应用；绘画排除名单始终优先。软件不会自动检测或修改浏览器扩展。").font(.footnote).foregroundStyle(.secondary)
-                    Divider()
-                    Text("只有特定页面或区域无菜单时，目标可能没有菜单或网页自行处理了右键。仍无法触发，可到测试页临时开启监控与日志，复现一次并查看长按判定记录；排查后关闭监控。提交计数不代表目标已显示菜单。")
-                }.frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button("添加应用…") { model.act { app.output.addExcludedApplication(compatibility: true) } }
+                }
+            } header: { Text("所选应用") } footer: {
+                footerNote("关闭兼容选项会保留所选应用；绘画排除名单始终优先。软件不会自动检测或修改浏览器扩展。")
             }
-            HStack { Spacer(); Button("完成") { longPressHelpState.shown = false }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 500, height: 540)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).accessibilityHidden(true)
+                Text("注意：此设置也会影响通过本地文件路径打开的静态网页。未拦截右键的页面可能出现菜单关闭、重新弹出等异常；遇到此情况，请关闭兼容选项。")
+                    .font(.callout).fontWeight(.semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.padding(.horizontal, 10)
+        }
     }
     private var permissions: some View {
         Group {
@@ -314,6 +377,11 @@ struct SettingsDetail: View {
             }
         }.frame(maxWidth: .infinity)
     }
+}
+
+private final class LongPressHelpState: ObservableObject {
+    @Published var shown = false
+    @Published var section = 0
 }
 
 private final class ExplanationState: ObservableObject { @Published var shown = false }
