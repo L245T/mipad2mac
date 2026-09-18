@@ -18,4 +18,5 @@ text_size = 13
 label_pos = 'bottom'
 arrange_by = None
 icon_locations = {'MiPad2Mac.app': (170, 204), 'Applications': (490, 204), '安装说明.txt': (330, 325)}
-hide_extensions = ['MiPad2Mac.app']
+# Do not add FinderInfo to the signed app bundle; it invalidates strict verification.
+hide_extensions = []
