@@ -83,7 +83,7 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
         scroll.documentView = table
         view = NSView(); view.clipsToBounds = true
         scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
-        NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8), scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
+        NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
         table.selectRowIndexes(IndexSet(integer: model.selection), byExtendingSelection: false)
     }
     func install(in window: NSWindow) {
@@ -98,7 +98,7 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
         image.symbolConfiguration = .init(pointSize: 17, weight: .regular)
         cell.textField = label; cell.imageView = image
         for child in [label, image] { child.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(child) }
-        NSLayoutConstraint.activate([image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8), image.widthAnchor.constraint(equalToConstant: 22), image.heightAnchor.constraint(equalToConstant: 22), image.centerYAnchor.constraint(equalTo: cell.centerYAnchor), label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 8), label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8), label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
+        NSLayoutConstraint.activate([image.leadingAnchor.constraint(equalTo: cell.leadingAnchor), image.widthAnchor.constraint(equalToConstant: 22), image.heightAnchor.constraint(equalToConstant: 22), image.centerYAnchor.constraint(equalTo: cell.centerYAnchor), label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 8), label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8), label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
         return cell
     }
     func tableViewSelectionDidChange(_ notification: Notification) {
