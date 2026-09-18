@@ -29,6 +29,7 @@ final class SettingsPresentation: ObservableObject {
 final class SystemSettingsController: NSSplitViewController {
     let model: SettingsPresentation
     private var opaqueSidebar: NSView?
+    private var desktopSidebar: NSVisualEffectView?
     static let names = ["控制", "权限检查", "测试", "设置", "关于"]
     init(app: AppDelegate) { model = SettingsPresentation(app); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
@@ -67,7 +68,19 @@ final class SystemSettingsController: NSSplitViewController {
     @objc private func updateMaterial() {
         guard let sidebar = splitViewItems.first?.viewController.view else { return }
         let enabled = UserDefaults.standard.object(forKey: "sidebarTransparency") as? Bool ?? true
-        if !enabled || NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+        let useDesktop = enabled && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        if useDesktop && desktopSidebar == nil {
+            let background = NSVisualEffectView()
+            background.material = .sidebar
+            background.blendingMode = .behindWindow
+            background.state = .followsWindowActiveState
+            background.frame = sidebar.bounds
+            background.autoresizingMask = [.width, .height]
+            sidebar.addSubview(background, positioned: .below, relativeTo: nil)
+            desktopSidebar = background
+        }
+        desktopSidebar?.isHidden = !useDesktop
+        if !useDesktop {
             if opaqueSidebar == nil {
                 let background = OpaqueSidebarBackground()
                 background.frame = sidebar.bounds; background.autoresizingMask = [.width, .height]
@@ -395,7 +408,7 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.settingsPage.materialToggle.state == .on }, set: { value in model.act { app.settingsPage.materialToggle.state = value ? .on : .off; app.settingsPage.materialChanged() } })) {
-                    Text("透明侧栏"); settingDescription("采用系统材质，遵循降低透明度设置。")
+                    Text("透明侧栏"); settingDescription("透出窗口背后的桌面与窗口，遵循降低透明度设置。")
                 }.accessibilityLabel("透明侧栏")
                 SettingsPicker("关闭窗口时", selection: Binding(get: { app.settingsPage.closePicker.indexOfSelectedItem }, set: { value in model.act { app.settingsPage.closePicker.selectItem(at: value); app.settingsPage.closeChanged() } })) {
                     Text("留在菜单栏").tag(0); Text("保留 Dock 图标").tag(1); Text("退出软件").tag(2)
