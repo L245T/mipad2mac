@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             self.latestSample = sample
             if self.enabled { self.output.receive(sample) }
         }
+        output.longPressDiagnostic = { [weak self] message in self?.testRecord.append(message) }
         output.didPost = { [weak self] in self?.reader.measurement?.recordPost(at: ProcessInfo.processInfo.systemUptime) }
         applyMonitoring()
         reader.start()

@@ -3,7 +3,7 @@ import CoreGraphics
 
 /// Ordinary pointer contacts are deferred; excluded drawing applications use PointerGesture unchanged.
 public struct LongPressGesture {
-    private enum Phase { case idle, pending, dragging, direct, suppressed }
+    private enum Phase { case idle, pending, dragging, direct, completed, suppressed }
     private var phase = Phase.idle
     private var direct = PointerGesture()
     private var origin = CGPoint.zero
@@ -16,6 +16,12 @@ public struct LongPressGesture {
     public mutating func consume(_ sample: Sample, mapping: Mapping, now: TimeInterval,
                                  enabled: Bool, delay: TimeInterval, drawing: Bool) -> [PointerEvent] {
         let contact = sample.touching && sample.inRange && !sample.eraser
+        if phase == .completed {
+            // The context menu owns subsequent motion. Never click or drag again until a new contact.
+            if !contact { phase = .idle }
+            guard sample.inRange && sample.positionValid && !sample.eraser else { return [] }
+            return [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))]
+        }
         if phase == .suppressed {
             if !contact { phase = .idle }
             return []
@@ -62,7 +68,7 @@ public struct LongPressGesture {
     /// Called by a separate timer, independent of diagnostics refresh and report frequency.
     public mutating func fire(now: TimeInterval) -> [PointerEvent] {
         guard phase == .pending, let deadline, now >= deadline else { return [] }
-        phase = .suppressed; self.deadline = nil
+        phase = .completed; self.deadline = nil
         return [PointerEvent(action: .rightDown, point: origin), PointerEvent(action: .rightUp, point: origin)]
     }
 

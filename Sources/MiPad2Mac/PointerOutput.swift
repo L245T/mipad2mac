@@ -12,6 +12,7 @@ final class PointerOutput {
     private var currentSample: Sample?
     var proximityCount = 0
     var didPost: () -> Void = {}
+    var longPressDiagnostic: (String) -> Void = { _ in }
     private var gesture = LongPressGesture()
     let longPress = LongPressPreferences()
     private var longPressTimer: Timer?
@@ -31,6 +32,7 @@ final class PointerOutput {
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self, self.gesture.isPending else { return }
+            self.longPressDiagnostic("长按取消：前台应用切换")
             self.release()
         }
     }
@@ -44,11 +46,20 @@ final class PointerOutput {
         var element: AXUIElement?
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.05)
-        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success,
-              let element else { return nil }
+        let result = AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element)
+        guard result == .success, let element else {
+            longPressDiagnostic("长按目标识别失败：AX \(result.rawValue)")
+            return nil
+        }
         var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
-        return NSRunningApplication(processIdentifier: pid)
+        let pidResult = AXUIElementGetPid(element, &pid)
+        guard pidResult == .success else {
+            longPressDiagnostic("长按目标进程识别失败：AX \(pidResult.rawValue)")
+            return nil
+        }
+        let app = NSRunningApplication(processIdentifier: pid)
+        if app?.bundleIdentifier == nil { longPressDiagnostic("长按目标没有应用标识：PID \(pid)") }
+        return app
     }
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
         release(); edit(longPress)
@@ -80,6 +91,7 @@ final class PointerOutput {
             guard let candidateTarget = self.candidateTarget,
                   self.target(at: self.pressLocation)?.processIdentifier == candidateTarget,
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == self.candidateFrontmost else {
+                self.longPressDiagnostic("长按取消：到时目标应用或前台应用已变化/无法识别")
                 self.release(); return
             }
             self.emit(self.gesture.fire(now: ProcessInfo.processInfo.systemUptime))
@@ -131,12 +143,22 @@ final class PointerOutput {
             candidateFrontmost = frontmost?.processIdentifier
             deferredContact = longPress.enabled && !frontmostExcluded
                 && (targetApp?.bundleIdentifier.map { !longPress.excludes($0) } ?? false)
+            if longPress.enabled {
+                longPressDiagnostic("长按判定：目标 \(targetApp?.bundleIdentifier ?? "未知")，前台 \(frontmost?.bundleIdentifier ?? "未知")，\(deferredContact ? "开始计时" : "即时左键（排除或目标未识别）")")
+            }
         }
         if contact { contactSample = sample }
         // A deferred tap is emitted on lift; retain the last actual contact's tablet fields.
         if !contact && gesture.isPending { currentSample = contactSample }
-        emit(gesture.consume(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
-                             enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled))
+        let wasPending = gesture.isPending
+        let events = gesture.consume(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
+                                     enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled)
+        if wasPending && !gesture.isPending {
+            longPressDiagnostic(events.contains { $0.action == .drag }
+                ? "长按取消：移动达到 4 逻辑点，进入拖动"
+                : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围"))
+        }
+        emit(events)
         if gesture.isPending { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
         if !contact { contactSample = nil }
@@ -214,7 +236,10 @@ final class PointerOutput {
         if action == .up { upCount += 1; postedLeft = false }
         if right { rightEventCount += 1 }
         if action == .rightDown { postedRight = true }
-        if action == .rightUp { postedRight = false; rightClickCount += 1; lastRelease = -Double.infinity }
+        if action == .rightUp {
+            postedRight = false; rightClickCount += 1; lastRelease = -Double.infinity
+            longPressDiagnostic("长按右键已提交：\(candidateTarget.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier } ?? "未知")；目标软件响应待验证")
+        }
         if action == .move { moveCount += 1 }
         if action == .drag { dragCount += 1 }
         lastPoint = point

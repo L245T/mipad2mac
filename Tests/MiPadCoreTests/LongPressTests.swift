@@ -34,8 +34,9 @@ private func feed(_ g: inout LongPressGesture, _ s: Sample, time: Double = 0, en
     #expect(right.map(\.action) == [.rightDown, .rightUp])
     #expect(right.allSatisfy { $0.point == CGPoint(x: 400, y: 520) })
     #expect(g.fire(now: 2).isEmpty)
-    #expect(feed(&g, pen(0.8), time: 3).isEmpty)
-    #expect(feed(&g, pen(down: false), time: 4).isEmpty)
+    let motion = feed(&g, pen(0.8), time: 3)
+    #expect(motion == [PointerEvent(action: .move, point: CGPoint(x: 700, y: 520))])
+    #expect(feed(&g, pen(0, 1, down: false, valid: false), time: 4).isEmpty)
     #expect(g.isIdle)
 }
 
@@ -119,4 +120,17 @@ private func feed(_ g: inout LongPressGesture, _ s: Sample, time: Double = 0, en
     _ = feed(&g, pen(), time: 1, delay: restored.delay)
     #expect(g.fire(now: 2.19).isEmpty)
     #expect(g.fire(now: 2.2).map(\.action) == [.rightDown, .rightUp])
+}
+
+@Test func completedLongPressTracksWithoutClicksAndNewContactCanTap() {
+    var g = LongPressGesture()
+    _ = feed(&g, pen()); _ = g.fire(now: 0.6)
+    for x in [0.6, 0.7, 0.5] {
+        #expect(feed(&g, pen(x), time: 1).map(\.action) == [.move])
+        #expect(g.fire(now: 2).isEmpty)
+    }
+    #expect(feed(&g, pen(0.5, down: false), time: 3).map(\.action) == [.move])
+    #expect(g.isIdle)
+    _ = feed(&g, pen(), time: 4)
+    #expect(feed(&g, pen(down: false), time: 4.1).map(\.action) == [.down, .up])
 }
