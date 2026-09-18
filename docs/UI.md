@@ -76,3 +76,7 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 开关使用 NSSwitch / SwiftUI Switch 的 mini 尺寸，按系统内在尺寸布局；滑块使用 SwiftUI Slider regular 尺寸与原生 step: 1，采用系统高度，不手工缩放滑钮。原生控件负责 Liquid Glass 外观和按下/切换/拖动反馈，不叠加自绘玻璃层。SwiftUI 刷新仅在状态变化时写回原生控件，避免无关刷新干扰控件追踪动画。
 
 构建明确传入当前选择的 macOS SDK 路径和实际 SDK 版本，并检查 Mach-O 的链接 SDK 与其一致，防止 Swift Build 将部署下限误记为 SDK 导致旧外观。最低系统版本仍为 13.0；新版控件基于 macOS 27 验证，macOS 26 未实测。苹果参考：[Build an AppKit app with the new design](https://developer.apple.com/videos/play/wwdc2025/310/)、[Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)。
+
+## 权限恢复操作指引
+
+权限页在“重新检查”下方提供默认收起的“已授权但仍显示未授权？”指引。展开后按退出应用、打开对应权限、移除旧条目并添加当前App、重开并重新检查四步排列；仅处理仍未授权的项目，提醒不要选中旧版或安装镜像副本。系统控制权限名称按macOS27“设备控制和数据访问”/旧版“辅助功能”展示。页面只显示操作步骤，不诊断失败原因，不自动重置权限。

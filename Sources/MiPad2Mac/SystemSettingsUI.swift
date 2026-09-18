@@ -343,7 +343,32 @@ struct SettingsDetail: View {
                 }
             } header: { Text("所需权限") } footer: { footerNote("选择 MiPad2Mac 控制后，权限、笔设备和目标屏幕就绪时尝试启用。输入监控授权后可能需要重启应用。") }
             SettingsSection { HStack { Text("权限检查"); help("macOS 27 的控制权限名为“设备控制和数据访问”，旧系统称“辅助功能”。两种权限分别申请，已授权按钮不可重复申请。"); Spacer(); Button("重新检查") { model.act { app.refreshPermissions() } } } }
+            SettingsSection {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 12) {
+                        permissionRecoveryStep("1", "退出应用", "从菜单栏 HID 菜单选择“退出 MiPad2Mac”，不要只关闭窗口。")
+                        permissionRecoveryStep("2", "打开对应权限", "进入系统设置 → 隐私与安全，打开“\(controlPermissionName)”或“输入监控”。仅处理仍显示未授权的项目。")
+                        permissionRecoveryStep("3", "移除后重新添加", "选中列表中的 MiPad2Mac，点“−”移除；再点“+”，选择当前使用的 MiPad2Mac.app，点“打开”并开启权限。请勿选到旧版或安装镜像中的副本。")
+                        permissionRecoveryStep("4", "重开并检查", "重新打开刚添加的 MiPad2Mac，回到本页点“重新检查”。若系统要求退出并重新打开，请按提示操作。")
+                    }.padding(.top, 8)
+                } label: { Text("已授权但仍显示未授权？").fontWeight(.medium) }
+                .disclosureGroupStyle(HelpDisclosureStyle(summary: "查看重新添加权限的操作指引"))
+            }
+
         }
+    }
+    private var controlPermissionName: String {
+        if #available(macOS 27, *) { return "设备控制和数据访问" }
+        return "辅助功能"
+    }
+    private func permissionRecoveryStep(_ number: String, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(number).monospacedDigit().foregroundStyle(.secondary).frame(width: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).fontWeight(.medium)
+                Text(detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.font(.callout)
     }
     private var testing: some View {
         Group {
