@@ -518,14 +518,17 @@ private final class LongPressHelpState: ObservableObject {
     }
 }
 
-private final class ExplanationState: ObservableObject { @Published var shown = false }
-private struct ExplanationButton: View {
+/// AppKit's standard help button retains native sizing, keyboard access and popover styling.
+private struct ExplanationButton: NSViewRepresentable {
     let text: String
     var label: String = "查看说明"
-    @StateObject private var state = ExplanationState()
-    var body: some View {
-        Button { state.shown.toggle() } label: { Image(systemName: "questionmark.circle").foregroundStyle(.secondary) }
-            .buttonStyle(.plain).accessibilityLabel(label)
-            .popover(isPresented: $state.shown) { Text(text).font(.callout).multilineTextAlignment(.leading).padding(16).frame(width: 320).fixedSize(horizontal: false, vertical: true) }
+    func makeNSView(context: Context) -> HelpButton {
+        HelpButton(title: label, explanation: text)
+    }
+    func updateNSView(_ button: HelpButton, context: Context) {
+        button.configure(title: label, explanation: text)
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: HelpButton, context: Context) -> CGSize? {
+        nsView.intrinsicContentSize
     }
 }

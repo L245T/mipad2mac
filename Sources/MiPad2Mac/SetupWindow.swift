@@ -136,7 +136,7 @@ final class NativeToggle: NSStackView {
     var statusText: String? { didSet { refreshState() } }
     var state: NSControl.StateValue {
         get { toggle.state }
-        set { toggle.state = newValue; refreshState() }
+        set { if toggle.state != newValue { toggle.state = newValue }; refreshState() }
     }
     init(_ title: String) {
         super.init(frame: .zero)
@@ -147,6 +147,7 @@ final class NativeToggle: NSStackView {
         label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         status.font = .systemFont(ofSize: 12, weight: .medium)
         status.setContentCompressionResistancePriority(.required, for: .horizontal)
+        toggle.controlSize = .mini
         toggle.setContentHuggingPriority(.required, for: .horizontal)
         toggle.setContentCompressionResistancePriority(.required, for: .horizontal)
         toggle.setAccessibilityLabel(title)
@@ -167,18 +168,22 @@ final class NativeToggle: NSStackView {
 }
 
 final class HelpButton: NSButton {
-    private let explanation: String
+    private var explanation: String
     private var helpPopover: NSPopover?
     init(title: String, explanation: String) {
         self.explanation = explanation
         super.init(frame: .zero)
         bezelStyle = .helpButton
         self.title = ""
-        toolTip = title + "说明"
-        setAccessibilityLabel(title + "说明")
+        configure(title: title, explanation: explanation)
         target = self; action = #selector(showHelp)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func configure(title: String, explanation: String) {
+        self.explanation = explanation
+        toolTip = title
+        setAccessibilityLabel(title)
+    }
     @objc private func showHelp() {
         if let helpPopover, helpPopover.isShown { helpPopover.close(); return }
         let label = NativeLayout.text(explanation)
@@ -204,11 +209,6 @@ final class SettingsRow: NSStackView {
         title.setContentHuggingPriority(.defaultLow, for: .horizontal)
         addArrangedSubview(title)
         if let help { addArrangedSubview(HelpButton(title: label, explanation: help)) }
-        if let buttons = control as? NSStackView {
-            let width = buttons.arrangedSubviews.reduce(CGFloat(0)) { $0 + $1.fittingSize.width }
-                + buttons.spacing * CGFloat(max(0, buttons.arrangedSubviews.count - 1))
-            buttons.widthAnchor.constraint(equalToConstant: width).isActive = true
-        }
         control.setContentHuggingPriority(.required, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
         addArrangedSubview(control)

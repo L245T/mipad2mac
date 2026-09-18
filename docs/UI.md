@@ -73,10 +73,18 @@ MiPad2Mac 采用 macOS 系统设置式布局，优先使用公开原生组件，
 
 ## 原生控件与新版 SDK
 
-开关使用 NSSwitch / SwiftUI Switch 的 mini 尺寸，按系统内在尺寸布局；滑块使用 SwiftUI Slider regular 尺寸与原生 step: 1，采用系统高度，不手工缩放滑钮。原生控件负责 Liquid Glass 外观和按下/切换/拖动反馈，不叠加自绘玻璃层。SwiftUI 刷新仅在状态变化时写回原生控件，避免无关刷新干扰控件追踪动画。
+开关使用 SwiftUI Switch 的 mini 尺寸（旧 AppKit 页面统一为 NSSwitch mini），按系统内在尺寸布局；滑块使用 SwiftUI Slider regular 尺寸与原生 step: 1，采用系统高度，不手工缩放滑钮。原生控件负责 Liquid Glass 外观和按下/切换/拖动反馈，不叠加自绘玻璃层。SwiftUI 刷新仅在状态变化时写回原生控件，避免无关刷新干扰控件追踪动画。
 
 构建明确传入当前选择的 macOS SDK 路径和实际 SDK 版本，并检查 Mach-O 的链接 SDK 与其一致，防止 Swift Build 将部署下限误记为 SDK 导致旧外观。最低系统版本仍为 13.0；新版控件基于 macOS 27 验证，macOS 26 未实测。苹果参考：[Build an AppKit app with the new design](https://developer.apple.com/videos/play/wwdc2025/310/)、[Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)。
 
 ## 权限恢复操作指引
 
 权限页在“重新检查”下方提供默认收起的“已授权但仍显示未授权？”指引。展开后按退出应用、打开对应权限、移除旧条目并添加当前App、重开并重新检查四步排列；仅处理仍未授权的项目，提醒不要选中旧版或安装镜像副本。系统控制权限名称按macOS27“设备控制和数据访问”/旧版“辅助功能”展示。页面只显示操作步骤，不诊断失败原因，不自动重置权限。
+
+## 全控件 SDK 接入检查
+
+主页面的按钮、菜单选择器、步进器、分段选择、开关及滑块使用标准系统控件。侧栏采用 NSTableView sourceList 的原生选择高亮；问号帮助采用 AppKit helpButton 和 NSPopover。旧 AppKit 设置行不再缓存并锁定按钮组宽度，跟随系统内在尺寸变化。
+
+文件/应用选择、导出、警告分别使用 NSOpenPanel、NSSavePanel、NSAlert；不覆盖它们的绘制或玻璃背景。卡片、已确认的折叠排版和圆角滚动槽属于内容布局与用户定制，保留；滚动滑钮仍由系统绘制。测试输入画布是诊断内容，不作为按钮替换。
+
+macOS27已逐页检查控制、权限、测试、设置、关于和长按帮助的排版，以及菜单、帮助浮窗、打开/保存对话框。错误警告分支仅代码核对。macOS26、完整深色/增强对比度/减少动态效果矩阵及VoiceOver全流程仍待实测。

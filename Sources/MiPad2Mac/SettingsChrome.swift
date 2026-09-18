@@ -41,7 +41,7 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
         scroll.autohidesScrollers = true; scroll.borderType = .noBorder
 
         table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("page")))
-        table.headerView = nil; table.style = .plain; table.backgroundColor = .clear
+        table.headerView = nil; table.style = .sourceList; table.backgroundColor = .clear
         table.selectionHighlightStyle = .regular
         table.rowHeight = 32; table.intercellSpacing = NSSize(width: 0, height: 2)
         table.allowsEmptySelection = false; table.dataSource = self; table.delegate = self
@@ -56,7 +56,6 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
         scroll.topAnchor.constraint(equalTo: guide.topAnchor).isActive = true
     }
     func numberOfRows(in tableView: NSTableView) -> Int { SystemSettingsController.names.count }
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { SettingsSelectionRow() }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: SystemSettingsController.names[row]); label.font = .systemFont(ofSize: 13)
@@ -74,44 +73,13 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
         if table.selectedRow != index { table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
     }
 }
-private final class SettingsSelectionRow: NSTableRowView {
-    override var allowsVibrancy: Bool { false }
-    override func drawSelection(in dirtyRect: NSRect) {
-        (isEmphasized ? NSColor.controlAccentColor : NSColor.unemphasizedSelectedContentBackgroundColor).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 0), xRadius: 9, yRadius: 9).fill()
-    }
-}
-
-/// Native switch geometry and accessibility; do not scale a painted imitation.
-private struct SettingsSwitch: NSViewRepresentable {
-    @Binding var isOn: Bool
-    @Environment(\.isEnabled) private var isEnabled
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSSwitch {
-        let control = NSSwitch(); control.controlSize = .mini
-        control.target = context.coordinator; control.action = #selector(Coordinator.changed(_:))
-        control.setContentHuggingPriority(.required, for: .horizontal)
-        return control
-    }
-    func updateNSView(_ control: NSSwitch, context: Context) {
-        context.coordinator.parent = self
-        let next: NSControl.StateValue = isOn ? .on : .off
-        // Avoid resetting the native tracking animation during unrelated SwiftUI refreshes.
-        if control.state != next { control.state = next }
-        control.isEnabled = isEnabled
-    }
-    final class Coordinator: NSObject {
-        var parent: SettingsSwitch
-        init(_ parent: SettingsSwitch) { self.parent = parent }
-        @objc func changed(_ sender: NSSwitch) { parent.isOn = sender.state == .on }
-    }
-}
+/// Standard SwiftUI switch supplies native tracking, focus and accessibility labels.
 struct SettingsToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) { configuration.label }.frame(maxWidth: .infinity, alignment: .leading)
-            SettingsSwitch(isOn: configuration.$isOn).controlSize(.mini).fixedSize()
-        }.accessibilityElement(children: .combine)
+        Toggle(isOn: configuration.$isOn) {
+            VStack(alignment: .leading, spacing: 3) { configuration.label }
+                .font(.body).frame(maxWidth: .infinity, alignment: .leading)
+        }.toggleStyle(.switch).controlSize(.mini)
     }
 }
 
