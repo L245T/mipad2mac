@@ -14,8 +14,10 @@ swift build -c release --disable-sandbox --cache-path .build/cache --sdk "$BUILD
     -Xlinker -platform_version -Xlinker macos -Xlinker 13.0 -Xlinker "$BUILD_SDK_VERSION"
 LINKED_SDK_VERSION="$(xcrun otool -l .build/release/MiPad2Mac | awk '$1 == "sdk" {print $2; exit}')"
 [[ "$LINKED_SDK_VERSION" == "$BUILD_SDK_VERSION" ]] || { echo "Linked SDK does not match the selected SDK; refusing package." >&2; exit 1; }
-mkdir -p "$PWD/dist"
-STAGING="$(mktemp -d "$PWD/dist/.app-build.XXXXXX")"
+OUTPUT_DIR="${MIPAD_OUTPUT_DIR:-$PWD/dist}"
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+STAGING="$(mktemp -d "$OUTPUT_DIR/.app-build.XXXXXX")"
 trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/MiPad2Mac.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -34,7 +36,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>MiPad2Mac</string>
 <key>CFBundleIconFile</key><string>MiPad2Mac.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.5.2</string>
+<key>CFBundleShortVersionString</key><string>0.5.3</string>
 <key>CFBundleVersion</key><string>24</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
@@ -44,10 +46,10 @@ PLIST
 [[ "$SOURCE_REVISION" == "$(python3 scripts/source-revision.py)" ]] || { echo "Source changed during build; refusing package." >&2; exit 1; }
 [[ "$GIT_REVISION" == "$(python3 scripts/build-revision.py)" ]] || { echo "Reference changed during build; refusing package." >&2; exit 1; }
 # Replace the app only after the build and resource packaging succeed.
-DEST="$PWD/dist/MiPad2Mac.app"
+DEST="$OUTPUT_DIR/MiPad2Mac.app"
 if [[ -d "$DEST" ]]; then
-    mkdir -p "$PWD/dist/archive"
-    ditto -c -k --keepParent "$DEST" "$PWD/dist/archive/MiPad2Mac-before-$(date +%Y%m%d-%H%M%S).zip"
+    mkdir -p "$OUTPUT_DIR/archive"
+    ditto -c -k --keepParent "$DEST" "$OUTPUT_DIR/archive/MiPad2Mac-before-$(date +%Y%m%d-%H%M%S).zip"
 fi
 ditto "$APP" "$DEST"
 # Refresh only this app's registration after replacing resources at the same path.

@@ -76,3 +76,11 @@ MIPAD_DMGBUILD="$PWD/.build/dmg-tools/bin/dmgbuild" bash scripts/build-dmg.sh
 每次发布需挂载最终 DMG 目视核对背景、文字、图标位置和 Applications 入口；首次布局实施需验证复制。最终文件生成后再计算 SHA-256，上传后核对附件。Release 正文依次为更新内容、注意事项（如有）、下载与安装、第三方备用下载（国内下载）、末尾 SHA-256；工程验证记录不放入正文。
 
 正式发布须完成安装窗口验收后再上传：窗口完整显示 App、方向箭头与 Applications 入口，安装说明可打开，复制出的 App 与包内内容及签名一致。Release 文案中的版本、附件名和 SHA-256 必须与最终产物相符。
+
+## 独立打包目录
+
+`MIPAD_OUTPUT_DIR` 可将 App 或 DMG 放入独立目录，默认仍为 `dist/`。使用 `MIPAD_APP_PATH` 指向已准备好的 MiPad2Mac.app 时，DMG 脚本不重新构建应用；它校验 Bundle ID，并拒绝覆盖该目录已有同名 DMG。
+
+可用 `MIPAD_INSTALL_NOTES_FILE` 提供已审核的安装说明。说明必须符合当前包的真实验证状态，不从旧 Release 复制安全提示或发行结论。若后续还有会修改包字节的步骤，使用 `MIPAD_DEFER_CHECKSUM=1`，全部完成后再生成最终 SHA-256；中间产物不能作为最终分发包。
+
+版本提交、源码推送和本地验证不代表 GitHub Release 已更新。各历史附件的状态以对应 Release 为准。
