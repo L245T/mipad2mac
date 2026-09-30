@@ -19,7 +19,7 @@ final class SettingsPresentation: ObservableObject {
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
-            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue]
+            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined()]
             + (app.monitoring ? [app.countsLabel.stringValue, app.sampleLabel.stringValue, app.packetLabel.stringValue, app.controlLabel.stringValue, app.testRecord.displayText] : [])
         let next = fields.joined(separator: "\u{1f}")
         if next != signature { signature = next; generation += 1 }
@@ -83,14 +83,11 @@ final class SystemSettingsController: NSSplitViewController {
 
 struct SettingsDetail: View {
     @ObservedObject var model: SettingsPresentation
-    var permissionsOnly = false
     @StateObject private var longPressHelpState = LongPressHelpState()
     private var app: AppDelegate { model.app }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-            if permissionsOnly { permissions }
-            else {
                 switch model.selection {
                 case 0: control
                 case 1: permissions
@@ -98,11 +95,10 @@ struct SettingsDetail: View {
                 case 3: settings
                 default: about
                 }
-            }
-            }.padding(20).padding(.top, permissionsOnly ? 0 : model.contentTopInset).frame(maxWidth: .infinity, alignment: .leading)
-                .background(SettingsScrollTrack(extendsUnderTitlebar: !permissionsOnly, topInset: model.contentTopInset))
+            }.padding(20).padding(.top, model.contentTopInset).frame(maxWidth: .infinity, alignment: .leading)
+                .background(SettingsScrollTrack(extendsUnderTitlebar: true, topInset: model.contentTopInset))
         }.scrollIndicators(.automatic)
-            .ignoresSafeArea(.container, edges: permissionsOnly ? [] : .top)
+            .ignoresSafeArea(.container, edges: .top)
             .background(Color(nsColor: .textBackgroundColor)).textSelection(.enabled)
             .controlSize(.regular).toggleStyle(SettingsToggleStyle()).labeledContentStyle(SettingsValueStyle())
             .sheet(isPresented: $longPressHelpState.shown) { longPressHelp }
@@ -117,7 +113,7 @@ struct SettingsDetail: View {
     }
     private func help(_ text: String) -> some View { ExplanationButton(text: text) }
     private func status(_ text: String, good: Bool) -> some View {
-        Text(text).foregroundStyle(good ? Color.green : Color.secondary).font(.callout)
+        Text(text).foregroundStyle(good ? Color.green : Color.red).font(.callout)
     }
     private var control: some View {
         Group {
@@ -325,6 +321,7 @@ struct SettingsDetail: View {
     }
     private var permissions: some View {
         Group {
+            if !app.startupCoordinator.notices.isEmpty { MigrationPermissionNotice(model: model) }
             SettingsSection {
                 LabeledContent("控制与事件发送") {
                     status(app.accessibilityAllowed && app.postAllowed ? "已授权" : "未授权", good: app.accessibilityAllowed && app.postAllowed)
@@ -334,9 +331,9 @@ struct SettingsDetail: View {
                     status(app.inputAllowed ? "已授权" : "未授权", good: app.inputAllowed)
                     Button("申请权限…") { model.act { app.requestInputPermission() } }.disabled(app.inputAllowed)
                 }
-            } header: { Text("所需权限") } footer: { footerNote("选择 MiPad2Mac 控制后，权限、笔设备和目标屏幕就绪时尝试启用。输入监控授权后可能需要重启应用。") }
+            } header: { Text("所需权限") } footer: { footerNote("选择MiPad2Mac控制后，权限、笔设备和目标屏幕就绪时尝试启用。授权后点“重新检查”；若系统提示需重开应用，请按提示操作。") }
             SettingsSection { HStack { Text("权限检查"); help("macOS 27 的控制权限名为“设备控制和数据访问”，旧系统称“辅助功能”。两种权限分别申请，已授权按钮不可重复申请。"); Spacer(); Button("重新检查") { model.act { app.refreshPermissions() } } } }
-            PermissionRecoverySection()
+            PermissionRecoverySection(expandForMigration: !app.permissionsReady && !app.startupCoordinator.notices.isEmpty)
 
         }
     }

@@ -11,8 +11,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let reader = HIDReader()
     let output = PointerOutput()
     var permissionPage: PermissionPage!
-    var permissionDialogPage: PermissionPage!
-    var permissionWindow: NSWindow?
     var tabs: SystemSettingsController!
     var automaticControl = AutomaticControl()
     var connection = TabletConnection()
@@ -105,8 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // Do not implicitly open a protected input device before the startup permission decision.
         readerStartupDeferred = !inputAllowed
         if !readerStartupDeferred { reader.start() }
+        if startupCoordinator.presentation.shouldSelectPermissions(permissionsReady: permissionsReady) {
+            tabs.selectTabViewItem(at: 1)
+        }
+        tabs.model.sync()
         if startupCoordinator.presentation.showMainWindow { presentMainWindow() }
-        if startupCoordinator.presentation.showMigrationNotice { startupCoordinator.presentNotices(app: self) }
         attemptAutoStart()
         updateChecker.changed = { [weak self] text in self?.updateLabel.stringValue = text }
         updateLabel.stringValue = updateChecker.idleMessage
@@ -149,7 +150,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         captureButton.target = self; captureButton.action = #selector(startPenCapture)
         autoUpdate.state = UserDefaults.standard.bool(forKey: "checkUpdatesAutomatically") ? .on : .off
         permissionPage = PermissionPage(owner: self)
-        permissionDialogPage = PermissionPage(owner: self)
         tabs = SystemSettingsController(app: self)
         tabs.install(in: window)
     }
@@ -201,17 +201,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         toggle()
         if !enabled && statusLabel.stringValue != "鼠标控制已暂停" { showWindow() }
     }
-    @objc func showSettings() { tabs.selectTabViewItem(at: 3); settingsPage.refresh(); showWindow() }
-    @objc func showPermissions() { refreshPermissions(); tabs.selectTabViewItem(at: 1); showWindow() }
-    func showPermissionDialog() {
-        if permissionWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 610, height: 470), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            w.title = "MiPad2Mac · 申请权限"; w.minSize = NSSize(width: 560, height: 400)
-            w.isReleasedWhenClosed = false; w.center()
-            w.contentViewController = NSHostingController(rootView: SettingsDetail(model: tabs.model, permissionsOnly: true)); permissionWindow = w
-        }
-        permissionWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
-    }
+    @objc func showSettings() { tabs.selectTabViewItem(at: 3); settingsPage.refresh(); showSelectedPage() }
+    @objc func showPermissions() { refreshPermissions(); tabs.selectTabViewItem(at: 1); showSelectedPage() }
     @objc func refreshPermissions() { permissionCheckedAt = -Double.infinity; refreshStats() }
     @objc func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "MiPad2Mac", .applicationVersion: appVersion, .credits: NSAttributedString(string: "作者：力利欧 @L245T\nPowered by GPT6-Astra\n基于 macOS 27 开发，macOS 26 暂未测试。\n小米平板 DP-in 笔输入适配\n当前仅支持触控笔输入")])
@@ -219,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
-    @objc func checkUpdates() { tabs.selectTabViewItem(at: 4); showWindow(); updateChecker.check(manual: true, window: window) }
+    @objc func checkUpdates() { tabs.selectTabViewItem(at: 4); showSelectedPage(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
         updateChecker.setAutomatically(autoUpdate.state == .on)
     }
@@ -338,7 +329,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if #available(macOS 27, *) { controlName = "设备控制和数据访问" } else { controlName = "辅助功能" }
         permissionsLabel.stringValue = "\(controlName)：\(accessibilityAllowed ? "已授权" : "未授权") · 鼠标事件发送：\(postAllowed ? "已允许" : "未允许") · 输入监控：\(inputAllowed ? "已授权" : "未授权")"
         permissionPage.update(control: accessibilityAllowed, input: inputAllowed, post: postAllowed)
-        permissionDialogPage.update(control: accessibilityAllowed, input: inputAllowed, post: postAllowed)
         if monitoring {
         countsLabel.stringValue = "已打开接口：\(reader.deviceCount) · 收到报文：\(reader.reports) · 解析成功：\(reader.decoded)"
         let now = ProcessInfo.processInfo.systemUptime
@@ -388,12 +378,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var permissionsReady: Bool { accessibilityAllowed && postAllowed && inputAllowed }
     func attemptAutoStart() {
         guard startupCoordinator.initialized, !enabled else { return }
-        if permissionsReady { permissionWindow?.close() }
         let index = screenPicker.indexOfSelectedItem - 1
         switch automaticControl.next(permissions: permissionsReady, target: displays.indices.contains(index), pen: reader.readyForControl) {
         case .wait: break
         case .requestPermissions:
-            if !startupCoordinator.suppressPermissionPresentation { showPermissionDialog() }
+            if !startupCoordinator.suppressPermissionPresentation {
+                tabs.selectTabViewItem(at: 1); presentMainWindow()
+            }
         case .enable: enableControl()
         }
     }
@@ -412,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         openPermissionSettings(anchor: "Privacy_ListenEvent")
         permissionCheckedAt = -Double.infinity
-        statusLabel.stringValue = "请在隐私与安全 → 输入监控中授权当前 MiPad2Mac；随后退出并重新打开。"
+        statusLabel.stringValue = "请在隐私与安全 → 输入监控中开启MiPad2Mac，再返回权限页点“重新检查”。若系统提示需重开应用，请按提示操作。"
     }
     private func openPermissionSettings(anchor: String) {
         // Request APIs need not display a dialog again after a previous decision.
@@ -529,6 +520,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         reader.start()
     }
     @objc func showWindow() {
+        refreshPermissions()
+        if !permissionsReady || !startupCoordinator.notices.isEmpty { tabs.selectTabViewItem(at: 1) }
+        showSelectedPage()
+    }
+    private func showSelectedPage() {
         startupCoordinator.userDidOpenWindow()
         presentMainWindow()
     }

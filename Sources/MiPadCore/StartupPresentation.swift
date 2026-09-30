@@ -12,10 +12,14 @@ public struct UpdateRestartContext: Equatable {
 public enum StartupSource: Equatable { case user, loginItem, updater(UpdateRestartContext) }
 public struct StartupPresentation: Equatable {
     public let showMainWindow: Bool
+    /// Render the notice in the main permission page, never a separate window.
     public let showMigrationNotice: Bool
     public let suppressAutomaticPermissionWindow: Bool
+    public func shouldSelectPermissions(permissionsReady: Bool) -> Bool {
+        showMigrationNotice || (showMainWindow && !permissionsReady)
+    }
     public static func decide(source: StartupSource, silentLogin: Bool, hasMigrationNotice: Bool) -> Self {
-        if hasMigrationNotice { return Self(showMainWindow: false, showMigrationNotice: true, suppressAutomaticPermissionWindow: true) }
+        if hasMigrationNotice { return Self(showMainWindow: true, showMigrationNotice: true, suppressAutomaticPermissionWindow: true) }
         switch source {
         case .user: return Self(showMainWindow: true, showMigrationNotice: false, suppressAutomaticPermissionWindow: false)
         case .loginItem: return Self(showMainWindow: !silentLogin, showMigrationNotice: false, suppressAutomaticPermissionWindow: true)

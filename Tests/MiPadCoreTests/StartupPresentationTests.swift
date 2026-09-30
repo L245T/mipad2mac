@@ -21,10 +21,19 @@ struct StartupPresentationTests {
             let context = UpdateRestartContext(transactionID: UUID(), source: source, mainWindowWasVisible: visible)
             #expect(StartupPresentation.decide(source: .updater(context), silentLogin: true, hasMigrationNotice: false).showMainWindow == visible)
             let notice = StartupPresentation.decide(source: .updater(context), silentLogin: true, hasMigrationNotice: true)
-            #expect(!notice.showMainWindow && notice.showMigrationNotice && notice.suppressAutomaticPermissionWindow)
+            #expect(notice.showMainWindow && notice.showMigrationNotice && notice.suppressAutomaticPermissionWindow)
         }
         let loginNotice = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: true)
-        #expect(loginNotice.showMigrationNotice && !loginNotice.showMainWindow)
+        #expect(loginNotice.showMigrationNotice && loginNotice.showMainWindow)
+    }
+    @Test func missingPermissionsSelectExistingPageOnlyForVisibleStartup() {
+        let manual = StartupPresentation.decide(source: .user, silentLogin: true, hasMigrationNotice: false)
+        #expect(manual.shouldSelectPermissions(permissionsReady: false))
+        #expect(!manual.shouldSelectPermissions(permissionsReady: true))
+        let login = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: false)
+        #expect(!login.shouldSelectPermissions(permissionsReady: false))
+        let migration = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: true)
+        #expect(migration.showMainWindow && migration.shouldSelectPermissions(permissionsReady: true))
     }
     @Test func silentPreferenceDefaultsOnAndRestoresWithoutRegisteringLogin() {
         let suite = "MiPadStartupTests." + UUID().uuidString
