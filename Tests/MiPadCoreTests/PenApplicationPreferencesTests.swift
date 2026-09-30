@@ -30,6 +30,21 @@ struct PenApplicationPreferencesTests {
         defaults.set(["example": "bad"], forKey: "penApplicationInteractionModes")
         #expect(PenApplicationPreferences(defaults: defaults).mode(for: "example") == .browse)
     }
+    @Test func readOnlyTextAndWebCardsScrollWithoutTurningEditorsIntoPages() {
+        let text = { (editable: Bool?) in PenHitNode(role: "AXTextArea", valueEditable: editable) }
+        let scroll = PenHitNode(role: "AXScrollArea"), window = PenHitNode(role: "AXWindow")
+        #expect(PenHitRegion.classify(nodes: [text(false), scroll, window]) == .content)
+        #expect(PenHitRegion.classify(nodes: [text(false), window]) == .content)
+        #expect(PenHitRegion.classify(nodes: [text(true), scroll, window]) == .chrome)
+        #expect(PenHitRegion.classify(nodes: [text(nil), scroll, window]) == .chrome)
+        #expect(PenHitRegion.classify(nodes: [text(false), PenHitNode(role: "AXToolbar"), window]) == .chrome)
+        #expect(PenHitRegion.classify(roles: ["AXStaticText", "AXButton", "AXGroup", "AXWebArea", "AXWindow"]) == .content)
+        #expect(PenHitRegion.classify(roles: ["AXButton", "AXToolbar", "AXWebArea", "AXWindow"]) == .chrome)
+        #expect(PenHitRegion.classify(roles: ["AXButton", "AXScrollArea", "AXWindow"]) == .chrome)
+        for role in ["AXList", "AXTable", "AXOutline"] {
+            #expect(PenHitRegion.classify(roles: ["AXStaticText", "AXRow", role, "AXWindow"]) == .content)
+        }
+    }
     @Test func windowChromeAndControlsNeverBecomePageScroll() {
         for roles in [["AXWindow"], ["AXStaticText","AXToolbar","AXWindow"],
                       ["AXScrollBar","AXScrollArea","AXWindow"], ["AXSlider","AXScrollArea","AXWindow"],

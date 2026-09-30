@@ -13,13 +13,18 @@ public struct ClickSequence {
     private var active: Tap?
     public init() {}
 
-    public mutating func begin(at point: CGPoint, now: TimeInterval, interval: TimeInterval) -> Int64 {
+    /// Looks ahead without consuming the previous tap, so navigation can honor a multi-tap drag.
+    public func nextCount(at point: CGPoint, now: TimeInterval, interval: TimeInterval) -> Int64 {
         var count: Int64 = 1
         if active == nil, let previous, now.isFinite, interval.isFinite, interval > 0,
            now >= previous.started, now - previous.started < interval,
            hypot(point.x - previous.point.x, point.y - previous.point.y) < 5 {
             count = previous.count == Int64.max ? previous.count : previous.count + 1
         }
+        return count
+    }
+    public mutating func begin(at point: CGPoint, now: TimeInterval, interval: TimeInterval) -> Int64 {
+        let count = nextCount(at: point, now: now, interval: interval)
         active = Tap(point: point, started: now, count: count)
         previous = nil
         return count

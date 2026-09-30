@@ -10,6 +10,18 @@ import Testing
         sequence.end(now: time + 0.1, interval: 0.5)
     }
 }
+@Test func selectionIntentPreviewDoesNotConsumeClickSequence() {
+    var sequence = ClickSequence()
+    #expect(sequence.nextCount(at: .zero, now: 0, interval: 0.5) == 1)
+    _ = sequence.begin(at: .zero, now: 0, interval: 0.5)
+    sequence.end(now: 0.05, interval: 0.5)
+    for _ in 0..<3 { #expect(sequence.nextCount(at: .zero, now: 0.1, interval: 0.5) == 2) }
+    #expect(sequence.nextCount(at: CGPoint(x: 20, y: 0), now: 0.1, interval: 0.5) == 1)
+    #expect(sequence.nextCount(at: .zero, now: 1, interval: 0.5) == 1)
+    #expect(sequence.begin(at: .zero, now: 0.1, interval: 0.5) == 2)
+    sequence.drag(to: CGPoint(x: 20, y: 0)); sequence.end(now: 0.15, interval: 0.5)
+    #expect(sequence.nextCount(at: .zero, now: 0.2, interval: 0.5) == 1)
+}
 @Test func clickTimeAndDistanceBoundariesUsePhysicalPress() {
     var sequence = ClickSequence()
     #expect(sequence.begin(at: .zero, now: 0, interval: 0.5) == 1)

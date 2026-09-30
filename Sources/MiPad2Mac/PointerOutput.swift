@@ -110,6 +110,8 @@ final class PointerOutput {
     private struct PenTarget {
         let app: NSRunningApplication?
         let region: PenHitRegion
+        let nodes: [PenHitNode]
+        let endReason: String
     }
     private func target(at point: CGPoint) -> PenTarget? {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.1
@@ -129,26 +131,43 @@ final class PointerOutput {
         }
         let app = NSRunningApplication(processIdentifier: pid)
         if app?.bundleIdentifier == nil { longPressDiagnostic("长按目标没有应用标识：PID \(pid)") }
-        var roles: [String] = []
+        var nodes: [PenHitNode] = []
         var ancestor = element
-        for _ in 0..<12 {
+        var endReason = "层数上限"
+        for _ in 0..<32 {
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            guard remaining > 0 else { break }
+            guard remaining > 0 else { endReason = "查询超时"; break }
             AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, remaining)))
             var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(ancestor, kAXRoleAttribute as CFString, &value) == .success,
-                  let role = value as? String else { break }
-            roles.append(role)
-            if role == kAXWindowRole { break }
+            let roleResult = AXUIElementCopyAttributeValue(ancestor, kAXRoleAttribute as CFString, &value)
+            guard roleResult == .success, let role = value as? String else {
+                endReason = "角色查询失败(\(roleResult.rawValue))"; break
+            }
+            var editable: Bool?
+            if role == kAXTextAreaRole || role == kAXTextFieldRole {
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                if remaining > 0 {
+                    AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, remaining)))
+                    var settable: DarwinBoolean = false
+                    if AXUIElementIsAttributeSettable(ancestor, kAXValueAttribute as CFString, &settable) == .success {
+                        editable = settable.boolValue
+                    }
+                }
+            }
+            nodes.append(PenHitNode(role: role, valueEditable: editable))
+            if role == kAXWindowRole { endReason = "到达窗口"; break }
             let parentRemaining = deadline - ProcessInfo.processInfo.systemUptime
-            guard parentRemaining > 0 else { break }
+            guard parentRemaining > 0 else { endReason = "查询超时"; break }
             AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, parentRemaining)))
-            guard AXUIElementCopyAttributeValue(ancestor, kAXParentAttribute as CFString, &value) == .success,
-                  let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { break }
+            let parentResult = AXUIElementCopyAttributeValue(ancestor, kAXParentAttribute as CFString, &value)
+            guard parentResult == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+                endReason = "父级查询结束(\(parentResult.rawValue))"; break
+            }
             ancestor = unsafeBitCast(value, to: AXUIElement.self)
         }
-        return PenTarget(app: app, region: PenHitRegion.classify(roles: roles))
+        return PenTarget(app: app, region: PenHitRegion.classify(nodes: nodes), nodes: nodes, endReason: endReason)
     }
+
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
         release(); edit(longPress)
     }
@@ -230,7 +249,19 @@ final class PointerOutput {
             candidateFrontmost = frontmost?.processIdentifier
             // Only recognized content scrolls. Window chrome and unidentified areas retain the pointer.
             contactMode = appMode == .browse && hit?.region == .content ? .browse : .pointer
-            deferredContact = longPress.enabled && appMode != .drawing && hit?.region != .chrome && targetApp != nil
+            // A held second/third tap explicitly selects text instead of starting a new scroll.
+            // Preview only: emit(.down) consumes the count once, with the physical press time.
+            let multiTapSelection = contactMode == .browse
+                && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval) > 1
+            if multiTapSelection { contactMode = .pointer }
+            if appMode == .browse {
+                let path = hit?.nodes.map { node in
+                    node.role + (node.valueEditable.map { $0 ? "[可编辑]" : "[只读]" } ?? "")
+                }.joined(separator: " → ") ?? "无区域信息"
+                longPressDiagnostic("浏览区域判定：\(targetApp?.bundleIdentifier ?? "未知")；\(path)；\(hit?.endReason ?? "目标查询失败")；区域\(String(describing: hit?.region)) → \(contactMode.title)")
+            }
+            deferredContact = longPress.enabled && appMode != .drawing && hit?.region != .chrome && targetApp != nil && !multiTapSelection
+            if multiTapSelection { longPressDiagnostic("连续点按：本次接触保持文字选择，不滚动、不触发长按右键") }
             compatibilityContact = deferredContact && longPress.compatibilityEnabled
                 && (targetApp?.bundleIdentifier.map { id in
                     longPress.compatibilityApplications.keys.contains { $0.caseInsensitiveCompare(id) == .orderedSame }

@@ -14,6 +14,8 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private var originalMapping = Mapping(bounds: .zero)
     private var scrollCountBeforeTitleDrag = 0
     private var drawingDownBefore = 0
+    private var textTraceBefore = 0
+    private var textScrollBefore = 0
     private let leftScroll = EventCheckScrollRegion(frame: NSRect(x: 30, y: 170, width: 280, height: 210))
     private let rightScroll = EventCheckScrollRegion(frame: NSRect(x: 410, y: 170, width: 280, height: 210))
     private var originalCursor = CGPoint.zero
@@ -64,6 +66,9 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         }
         append {
             self.check(self.view.receivedClickCounts == [1], "浏览短按完整单击到达")
+        }
+        // Start an independent scroll; a nearby tap within the click interval now means selection.
+        append(after: NSEvent.doubleClickInterval + 0.05) {
             self.pen(); self.pen(0.5, 0.6); self.output.release()
             self.pen(0.5, 0.7); self.pen(down: false)
         }
@@ -156,6 +161,56 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             let expected = self.output.mapping.point(x: 0.8, y: 0.45)
             let cursor = CGEvent(source: nil)?.location ?? .zero
             self.check(hypot(cursor.x - expected.x, cursor.y - expected.y) < 2, "跨区滚动光标跟随且抬笔不跳变")
+            self.output.release()
+            self.textTraceBefore = self.textView.trace.count
+            self.textPen(character: 2)
+        }
+        append(after: 0.04) { self.textPen(character: 2, verticalOffset: 20) }
+        append(after: 0.04) { self.textPen(character: 2, down: false, verticalOffset: 20) }
+        append {
+            self.check(self.textView.bridgeScrolls > 0, "浏览模式在只读文字区域实际收到滚动")
+            self.check(self.textView.trace.count == self.textTraceBefore, "只读文字滑动没有左键选字事件")
+            self.output.release(); self.textView.isEditable = true
+            self.textTraceBefore = self.textView.trace.count
+            self.textScrollBefore = self.textView.bridgeScrolls
+            self.textPen(character: 2)
+        }
+        append(after: 0.04) { self.textPen(character: 10) }
+        append(after: 0.04) { self.textPen(character: 10, down: false) }
+        append {
+            self.check(self.textView.trace.count > self.textTraceBefore && self.textView.selectedRange().length > 1, "浏览模式保留可编辑输入框拖选")
+            self.check(self.textView.bridgeScrolls == self.textScrollBefore, "可编辑输入框拖选不发送滚动")
+            self.output.release(); self.textView.isEditable = false
+            self.output.longPress.enabled = true
+            self.textTraceBefore = self.textView.trace.count
+            self.textScrollBefore = self.textView.bridgeScrolls
+            self.textPen(character: 2); self.textPen(character: 2, down: false)
+        }
+        append(after: cadence) { self.textPen(character: 2) }
+        append(after: cadence) { self.textPen(character: 10) }
+        append(after: cadence) { self.textPen(character: 10, down: false) }
+        append(after: cadence) {
+            let trace = Array(self.textView.trace.dropFirst(self.textTraceBefore))
+            self.check(trace.contains { $0.hasPrefix("down count=2") } && self.textView.selectedRange().length > "alpha".count, "浏览模式双击按住拖动扩展选词")
+            self.check(self.textView.bridgeScrolls == self.textScrollBefore, "浏览双击拖选不发送滚动")
+            self.output.release(); self.textTraceBefore = self.textView.trace.count
+            self.textPen(character: 2); self.textPen(character: 2, down: false)
+        }
+        append(after: cadence) { self.textPen(character: 2); self.textPen(character: 2, down: false) }
+        append(after: cadence) { self.textPen(character: 2) }
+        append(after: cadence) { self.textPen(character: 22) }
+        append(after: cadence) { self.textPen(character: 22, down: false) }
+        append(after: cadence) {
+            let trace = Array(self.textView.trace.dropFirst(self.textTraceBefore))
+            self.check(trace.contains { $0.hasPrefix("down count=3") } && self.textView.selectedRange().length > "alpha beta gamma\n".count, "浏览模式三击按住拖动扩展段落选择")
+            self.check(self.textView.bridgeScrolls == self.textScrollBefore && self.view.receivedRightClicks == 1, "浏览三击拖选不发送滚动或长按右键")
+            self.textTraceBefore = self.textView.trace.count
+            self.textPen(character: 2)
+        }
+        append(after: cadence) { self.textPen(character: 2, verticalOffset: 20) }
+        append(after: cadence) { self.textPen(character: 2, down: false, verticalOffset: 20) }
+        append(after: cadence) {
+            self.check(self.textView.bridgeScrolls > self.textScrollBefore && self.textView.trace.count == self.textTraceBefore, "文字拖选结束后下次滑动恢复滚动")
             self.finish()
         }
         runNext()
@@ -166,7 +221,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         let top = NSScreen.screens.first!.frame.maxY
         pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY) / (bounds.height - 1), down: down)
     }
-    private func textPen(character: Int, down: Bool = true) {
+    private func textPen(character: Int, down: Bool = true, verticalOffset: CGFloat = 0) {
         guard let layout = textView.layoutManager, let container = textView.textContainer else { return }
         layout.ensureLayout(for: container)
         let glyph = layout.glyphIndexForCharacter(at: character)
@@ -176,7 +231,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         let desktop = window.convertPoint(toScreen: windowPoint)
         let top = NSScreen.screens.first!.frame.maxY
         let bounds = output.mapping.bounds
-        pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY) / (bounds.height - 1), down: down)
+        pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY + verticalOffset) / (bounds.height - 1), down: down)
     }
     private func pen(_ x: Double = 0.5, _ y: Double = 0.5, down: Bool = true) {
         output.receive(Sample(x: x, y: y, touching: down, inRange: true,
@@ -227,6 +282,11 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
 
 private final class EventCheckTextView: NSTextView {
     var trace: [String] = []
+    var bridgeScrolls = 0
+    override func scrollWheel(with event: NSEvent) {
+        if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag { bridgeScrolls += 1 }
+        super.scrollWheel(with: event)
+    }
     override func mouseDown(with event: NSEvent) {
         trace.append("down count=\(event.clickCount) point=\(event.locationInWindow) buttons=\(NSEvent.pressedMouseButtons) number=\(event.eventNumber)")
         super.mouseDown(with: event)
