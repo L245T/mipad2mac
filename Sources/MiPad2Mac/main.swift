@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let controlNotification = ControlNotification()
     var automaticNotificationPending = false
     var tabletDisplayIDs: [UInt32] = []
+    let startupCoordinator = StartupCoordinator()
     let updateChecker = UpdateChecker()
     let testRecord = TestRecord()
     let settingsPage = SettingsPage()
@@ -97,9 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         NotificationCenter.default.addObserver(self, selector: #selector(displayChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.disable() }
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
         refreshStats()
+        startupCoordinator.initialize(current: CurrentReleaseIdentity.snapshot())
+        if startupCoordinator.notices.isEmpty { showWindow() }
+        else { startupCoordinator.presentNotices(app: self) }
+        attemptAutoStart()
         updateChecker.changed = { [weak self] text in self?.updateLabel.stringValue = text }
         updateLabel.stringValue = updateChecker.idleMessage
         updateChecker.check(manual: false, window: window)
@@ -372,12 +375,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     var permissionsReady: Bool { accessibilityAllowed && postAllowed && inputAllowed }
     func attemptAutoStart() {
-        guard !enabled else { return }
+        guard startupCoordinator.initialized, !enabled else { return }
         if permissionsReady { permissionWindow?.close() }
         let index = screenPicker.indexOfSelectedItem - 1
         switch automaticControl.next(permissions: permissionsReady, target: displays.indices.contains(index), pen: reader.readyForControl) {
         case .wait: break
-        case .requestPermissions: showPermissionDialog()
+        case .requestPermissions:
+            if !startupCoordinator.suppressPermissionPresentation { showPermissionDialog() }
         case .enable: enableControl()
         }
     }
