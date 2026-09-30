@@ -17,6 +17,7 @@ final class SettingsPresentation: ObservableObject {
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
+            app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
             String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy), String(app.updateChecker.scheduler.state.active != nil)]
@@ -143,6 +144,24 @@ struct SettingsDetail: View {
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
             } header: { Text("显示器") } footer: { footerNote("“跟随系统”自动适配目标显示器的旋转，也可手动指定角度；选择自动保存。修改映射会结束当前笔画，处理方式保持不变。显示的是逻辑分辨率。") }
+            SettingsSection {
+                SettingsPicker("应用", selection: Binding(get: { app.output.profileID ?? "" }, set: { value in model.act { app.output.selectProfile(value) } })) {
+                    if app.output.profileID == nil { Text("请先选择应用").tag("") }
+                    ForEach(app.output.profileApplications.keys.sorted(), id: \.self) { id in
+                        Text(app.output.profileApplications[id] ?? id).tag(id)
+                    }
+                }
+                SettingsPicker("默认模式", selection: Binding(get: { app.output.profileMode }, set: { value in model.act { app.output.changeNavigation(value) } })) {
+                    Text("指针").tag(PenNavigationMode.pointer)
+                    Text("浏览").tag(PenNavigationMode.browse)
+                }.disabled(app.output.profileID == nil || app.output.profileExcluded)
+                if app.output.profileExcluded {
+                    settingDescription("此应用在绘画排除名单中，保持指针模式。")
+                }
+                HStack { Spacer(); Button("选择其他应用…") { model.act { app.output.chooseNavigationApplication() } } }
+            } header: { Text("笔输入模式") } footer: {
+                footerNote("为所选应用保存。指针用于拖动、选字和绘画；浏览用于滑动滚动，轻点仍单击，静止长按仍右键。浏览器内绘画或选字前，请从HID菜单切回指针。")
+            }
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")

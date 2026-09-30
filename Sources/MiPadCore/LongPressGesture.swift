@@ -52,12 +52,15 @@ public struct LongPressJitterFilter: RawRepresentable, Hashable, CaseIterable {
 
 /// Ordinary pointer contacts are deferred; excluded drawing applications use PointerGesture unchanged.
 public struct LongPressGesture {
-    private enum Phase { case idle, pending, dragging, direct, completed, suppressed }
+    private enum Phase { case idle, pending, dragging, scrolling, direct, completed, suppressed }
     private var phase = Phase.idle
     private var direct = PointerGesture()
     private var origin = CGPoint.zero
     private var last = CGPoint.zero
     private var jitterFilter = LongPressJitterFilter.medium
+    private var navigationMode = PenNavigationMode.pointer
+    private var scrollAxis = PenScrollAxis.vertical
+    private var scrollRemainder = 0.0
     public private(set) var deadline: TimeInterval?
     public var hasScheduledClick: Bool { deadline != nil }
     public var isIdle: Bool { phase == .idle }
@@ -66,57 +69,92 @@ public struct LongPressGesture {
 
     public mutating func consume(_ sample: Sample, mapping: Mapping, now: TimeInterval,
                                  enabled: Bool, delay: TimeInterval, drawing: Bool, jitterFilter: LongPressJitterFilter = .medium) -> [PointerEvent] {
+        consumeNavigation(sample, mapping: mapping, now: now, enabled: enabled, delay: delay,
+                          drawing: drawing, jitterFilter: jitterFilter).pointer
+    }
+
+    /// One contact owns exactly one interpretation until lift, including after cancellation.
+    public mutating func consumeNavigation(_ sample: Sample, mapping: Mapping, now: TimeInterval,
+                                 enabled: Bool, delay: TimeInterval, drawing: Bool,
+                                 jitterFilter: LongPressJitterFilter = .medium,
+                                 navigation: PenNavigationMode = .pointer) -> PenGestureEvents {
         let contact = sample.touching && sample.inRange && !sample.eraser
         if phase == .completed {
             // The context menu owns subsequent motion. Never click or drag again until a new contact.
             if !contact { phase = .idle; deadline = nil }
             if !sample.inRange || !sample.positionValid || sample.eraser ||
                 movedBeyondTolerance(mapping.point(x: sample.x, y: sample.y)) { deadline = nil }
-            guard sample.inRange && sample.positionValid && !sample.eraser else { return [] }
-            return [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))]
+            guard sample.inRange && sample.positionValid && !sample.eraser else { return PenGestureEvents() }
+            return PenGestureEvents(pointer: [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))])
         }
         if phase == .suppressed {
             if !contact { phase = .idle }
-            return []
+            return PenGestureEvents()
+        }
+        // Invalid coordinates or loss of range cancel rather than synthesize a tap.
+        if !sample.inRange || sample.eraser || (contact && !sample.positionValid) {
+            return cancelNavigation()
         }
         if phase == .direct {
             let event = direct.consume(sample, mapping: mapping, drawing: drawing)
             if !contact { phase = .idle }
-            return event.map { [$0] } ?? []
-        }
-        // Invalid coordinates or loss of range cancel rather than synthesize a tap.
-        if !sample.inRange || sample.eraser || (contact && !sample.positionValid) {
-            return cancel()
+            return PenGestureEvents(pointer: event.map { [$0] } ?? [])
         }
         if phase == .idle {
             if !contact {
-                return sample.positionValid ? [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))] : []
+                return PenGestureEvents(pointer: sample.positionValid ? [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))] : [])
             }
-            if !enabled {
+            navigationMode = navigation
+            if !enabled && navigation == .pointer {
                 phase = .direct
-                return direct.consume(sample, mapping: mapping, drawing: drawing).map { [$0] } ?? []
+                return PenGestureEvents(pointer: direct.consume(sample, mapping: mapping, drawing: drawing).map { [$0] } ?? [])
             }
             self.jitterFilter = jitterFilter
             origin = mapping.point(x: sample.x, y: sample.y); last = origin
             phase = .pending
-            deadline = now + LongPressPreferences.validDelay(delay)
-            return []
+            deadline = enabled ? now + LongPressPreferences.validDelay(delay) : nil
+            return PenGestureEvents()
         }
         if !contact {
+            if phase == .scrolling {
+                phase = .idle; deadline = nil
+                return PenGestureEvents(scroll: [PenScrollEvent(anchor: origin, phase: .ended)])
+            }
             let wasPending = phase == .pending
             phase = .idle; deadline = nil
-            return wasPending ? [PointerEvent(action: .down, point: origin), PointerEvent(action: .up, point: origin)]
-                : [PointerEvent(action: .up, point: last)]
+            return PenGestureEvents(pointer: wasPending ? [PointerEvent(action: .down, point: origin), PointerEvent(action: .up, point: origin)]
+                : [PointerEvent(action: .up, point: last)])
         }
         let point = mapping.point(x: sample.x, y: sample.y)
+        if phase == .scrolling {
+            return scroll(to: point, phase: .changed)
+        }
+        if phase == .pending && navigationMode == .browse {
+            let dx = point.x - origin.x, dy = point.y - origin.y
+            guard hypot(dx, dy) >= PenScrollEvent.activationDistance else { return PenGestureEvents() }
+            scrollAxis = abs(dx) > abs(dy) * 1.5 ? .horizontal : .vertical
+            phase = .scrolling; deadline = nil; scrollRemainder = 0
+            return scroll(to: point, phase: .began)
+        }
         if phase == .pending {
             // Distance from initial contact, never accumulated path length. Movement wins over time.
-            guard movedBeyondTolerance(point) else { return [] }
+            guard movedBeyondTolerance(point) else { return PenGestureEvents() }
             phase = .dragging; deadline = nil; last = point
-            return [PointerEvent(action: .down, point: origin), PointerEvent(action: .drag, point: point)]
+            return PenGestureEvents(pointer: [PointerEvent(action: .down, point: origin), PointerEvent(action: .drag, point: point)])
         }
         last = point
-        return [PointerEvent(action: .drag, point: point)]
+        return PenGestureEvents(pointer: [PointerEvent(action: .drag, point: point)])
+    }
+
+    private mutating func scroll(to point: CGPoint, phase: PenScrollPhase) -> PenGestureEvents {
+        scrollRemainder += scrollAxis == .vertical ? point.y - last.y : point.x - last.x
+        last = point
+        let pixels = scrollRemainder.rounded(.towardZero)
+        scrollRemainder -= pixels
+        guard pixels != 0 || phase == .began else { return PenGestureEvents() }
+        return PenGestureEvents(scroll: [PenScrollEvent(anchor: origin, phase: phase,
+                horizontal: scrollAxis == .horizontal ? Int32(pixels) : 0,
+                vertical: scrollAxis == .vertical ? Int32(pixels) : 0)])
     }
 
     private func movedBeyondTolerance(_ point: CGPoint) -> Bool {
@@ -137,13 +175,17 @@ public struct LongPressGesture {
     }
 
     /// Suppress the rest of this contact so changing settings cannot start a new stroke mid-contact.
-    public mutating func cancel() -> [PointerEvent] {
+    public mutating func cancel() -> [PointerEvent] { cancelNavigation().pointer }
+
+    public mutating func cancelNavigation() -> PenGestureEvents {
+        let scroll = phase == .scrolling ? [PenScrollEvent(anchor: origin, phase: .cancelled)] : []
         var events: [PointerEvent] = []
         if phase == .direct, let event = direct.release() { events = [event] }
         if phase == .dragging { events = [PointerEvent(action: .up, point: last)] }
         if phase != .idle { phase = .suppressed }
         deadline = nil
-        return events
+        scrollRemainder = 0
+        return PenGestureEvents(pointer: events, scroll: scroll)
     }
 
     /// A disconnect ends the physical connection; a new connection may begin with a contact report.

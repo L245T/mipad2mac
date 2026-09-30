@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuUpdateNotice = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
+    let menuNavigation = NSMenuItem(title: "笔输入模式", action: nil, keyEquivalent: "")
     let menuTablet = NSMenuItem(title: "压力与倾斜输出", action: nil, keyEquivalent: "")
     let menuScreens = NSMenuItem(title: "目标显示器", action: nil, keyEquivalent: "")
     let rateTestLabel = NSTextField(wrappingLabelWithString: "测试会记录 15 秒实际输入；请持续用笔画圈。无需启用鼠标控制。")
@@ -166,6 +167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menuControl.target = self; menuControl.action = #selector(menuToggle); menu.addItem(menuControl)
         menuTablet.target = self; menuTablet.action = #selector(menuToggleTablet); menu.addItem(menuTablet)
         menuTablet.state = output.tabletEnabled ? .on : .off
+        menu.addItem(menuNavigation)
+        refreshNavigationMenu()
         menu.addItem(menuScreens); menu.addItem(.separator())
         for (title, action, key) in [("打开控制窗口", #selector(showWindow), ""), ("设置…", #selector(showSettings), ""), ("权限检查…", #selector(showPermissions), ""), ("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
@@ -185,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menuControl.title = enabled ? "暂停鼠标控制" : (automaticControl.requested ? "取消软件控制" : "启用鼠标控制")
         menuControl.isEnabled = true
         menuTablet.state = output.tabletEnabled ? .on : .off
+        refreshNavigationMenu()
         let screens = NSMenu(); screens.autoenablesItems = false
         for (index, _) in displays.enumerated() {
             let item = NSMenuItem(title: screenPicker.itemTitle(at: index + 1), action: #selector(menuSelectScreen(_:)), keyEquivalent: "")
@@ -193,6 +197,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             item.isEnabled = true; screens.addItem(item)
         }
         menuScreens.submenu = screens; menuScreens.isEnabled = !displays.isEmpty
+    }
+    func refreshNavigationMenu() {
+        let menu = NSMenu(); menu.autoenablesItems = false
+        let title = NSMenuItem(title: output.profileName, action: nil, keyEquivalent: "")
+        title.isEnabled = false; menu.addItem(title)
+        for (index, mode) in PenNavigationMode.allCases.enumerated() {
+            let item = NSMenuItem(title: mode.title, action: #selector(menuSelectNavigation(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index
+            item.state = output.profileMode == mode ? .on : .off
+            item.isEnabled = output.profileID != nil && !(mode == .browse && output.profileExcluded)
+            menu.addItem(item)
+        }
+        menuNavigation.submenu = menu
+        menuNavigation.title = "笔输入模式：" + output.profileMode.title
+    }
+    @objc func menuSelectNavigation(_ sender: NSMenuItem) {
+        guard PenNavigationMode.allCases.indices.contains(sender.tag) else { return }
+        output.changeNavigation(PenNavigationMode.allCases[sender.tag]); refreshNavigationMenu(); refreshStats()
     }
     @objc func menuSelectScreen(_ sender: NSMenuItem) {
         guard sender.tag > 0, sender.tag < screenPicker.numberOfItems else { return }
@@ -349,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let sample = latestSample {
             sampleLabel.stringValue = String(format: "X %.3f · Y %.3f · 接触 %@ · 范围内 %@ · 压感 %d",
                 sample.x, sample.y, sample.touching ? "是" : "否", sample.inRange ? "是" : "否", sample.pressure)
-            sampleLabel.stringValue += "\n倾斜 X \(sample.tiltX)° / Y \(sample.tiltY)° · barrel \(sample.barrel) · eraser \(sample.eraser) · 有效位置 \(sample.positionValid)\n压力与倾斜输出 \(output.tabletEnabled ? "开" : "关") · 接近/离开提交 \(output.proximityCount)"
+            sampleLabel.stringValue += "\n倾斜 X \(sample.tiltX)° / Y \(sample.tiltY)° · barrel \(sample.barrel) · eraser \(sample.eraser) · 有效位置 \(sample.positionValid)\n压力与倾斜输出 \(output.tabletEnabled ? "开" : "关") · 接近/离开提交 \(output.proximityCount)\n浏览滚动 \(output.scrollGestureCount) 次 · 滚动事件提交 \(output.scrollEventCount)"
         }
         }
         if enabled && !permissionsReady { disable(); statusLabel.stringValue = "权限发生变化，控制已暂停。" }
@@ -555,7 +577,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
-if CommandLine.arguments.contains("--probe") {
+if CommandLine.arguments.contains("--pointer-event-check") {
+    let app = NSApplication.shared
+    let check = PointerEventCheck()
+    app.delegate = check
+    app.setActivationPolicy(.regular)
+    app.run()
+} else if CommandLine.arguments.contains("--probe") {
     // Read-only probe: never requests Accessibility and never posts mouse events.
     print("MiPad2Mac \(appVersion) read-only probe")
     print("Input monitoring status: \(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent).rawValue)")

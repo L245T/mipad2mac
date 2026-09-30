@@ -8,6 +8,13 @@ final class PointerTestView: NSView {
     var bridgeDown = 0
     var bridgeUp = 0
     var bridgeClicks = 0
+    var bridgeScrolls = 0
+    var receivedClickCounts: [Int] = []
+    var receivedScrollPhases: [Int64] = []
+    var receivedRightClicks = 0
+    var receivedDrags = 0
+    var receivedTabletContacts = 0
+    private var lastScrollLog = -Double.infinity
     var systemDown = 0
     var cursor = CGPoint.zero
     var lastMessage = "请用笔轻点中央及四角，再拖动。此页区分桥接事件与系统原生事件。"
@@ -35,6 +42,7 @@ final class PointerTestView: NSView {
         cursor = convert(event.locationInWindow, from: nil)
         if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag {
             bridgeDown += 1; downPoint = cursor; dragged = false
+            if event.subtype == .tabletPoint { receivedTabletContacts += 1 }
             lastMessage = "收到 MiPad2Mac 按下，等待抬起"
         } else {
             systemDown += 1; downPoint = nil
@@ -45,6 +53,7 @@ final class PointerTestView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         inspectTablet(event)
+        if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag { receivedDrags += 1 }
         cursor = convert(event.locationInWindow, from: nil)
         if let downPoint, hypot(cursor.x - downPoint.x, cursor.y - downPoint.y) >= 4 { dragged = true }
         needsDisplay = true
@@ -56,6 +65,7 @@ final class PointerTestView: NSView {
             bridgeUp += 1
             if let downPoint, !dragged, hypot(cursor.x - downPoint.x, cursor.y - downPoint.y) < 4 {
                 bridgeClicks += 1
+                if receivedClickCounts.count < 200 { receivedClickCounts.append(event.clickCount) }
                 lastMessage = "完整轻点已到达此窗口；系统 clickCount = \(event.clickCount)"
             } else { lastMessage = "收到桥接抬起（拖动或本窗口未收到对应按下）" }
             downPoint = nil
@@ -67,11 +77,27 @@ final class PointerTestView: NSView {
         inspectTablet(event)
         cursor = convert(event.locationInWindow, from: nil); needsDisplay = true
     }
+    override func rightMouseUp(with event: NSEvent) {
+        guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag else { return }
+        receivedRightClicks += 1
+        record("本窗口收到桥接右键抬起")
+    }
+    override func scrollWheel(with event: NSEvent) {
+        guard let cg = event.cgEvent, cg.getIntegerValueField(.eventSourceUserData) == bridgeEventTag else { return }
+        bridgeScrolls += 1
+        let phase = cg.getIntegerValueField(.scrollWheelEventScrollPhase)
+        if receivedScrollPhases.count < 200 { receivedScrollPhases.append(phase) }
+        if phase != 2 || event.timestamp - lastScrollLog >= 0.5 {
+            record("本窗口收到浏览滚动：X \(event.scrollingDeltaX)，Y \(event.scrollingDeltaY)，阶段 \(event.phase.rawValue)")
+            lastScrollLog = event.timestamp
+        }
+        needsDisplay = true
+    }
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill(); bounds.fill()
         let title = "MiPad2Mac 输入验收"
         title.draw(in: NSRect(x: 24, y: bounds.height - 58, width: max(0, bounds.width - 48), height: 34), withAttributes: [.font: NSFont.boldSystemFont(ofSize: 24), .foregroundColor: NSColor.labelColor])
-        let detail = "桥接按下 \(bridgeDown) / 抬起 \(bridgeUp) / 完整轻点 \(bridgeClicks)　·　其他来源按下 \(systemDown)\n\(lastMessage)\n\(tabletMessage)"
+        let detail = "桥接按下 \(bridgeDown) / 抬起 \(bridgeUp) / 轻点 \(bridgeClicks) / 滚动 \(bridgeScrolls)　·　其他来源按下 \(systemDown)\n\(lastMessage)\n\(tabletMessage)"
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 5
         detail.draw(in: NSRect(x: 24, y: bounds.height - 182, width: max(0, bounds.width - 48), height: 110), withAttributes: [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph])

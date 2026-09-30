@@ -14,7 +14,51 @@ final class PointerOutput {
     var didPost: () -> Void = {}
     var longPressDiagnostic: (String) -> Void = { _ in }
     private var gesture = LongPressGesture()
-    let longPress = LongPressPreferences()
+    let longPress: LongPressPreferences
+    let navigation: PenNavigationPreferences
+    private var lastExternalApplication: NSRunningApplication?
+    var selectedProfileID: String?
+    private var selectedProfileName: String?
+    private var contactMode = PenNavigationMode.pointer
+    var scrollEventCount = 0
+    var scrollGestureCount = 0
+    private var postedScrollAnchor: CGPoint?
+
+    var profileID: String? { selectedProfileID ?? lastExternalApplication?.bundleIdentifier }
+    var profileName: String { selectedProfileName ?? lastExternalApplication?.localizedName ?? "请先选择应用" }
+    var profileExcluded: Bool { profileID.map { longPress.excludes($0) } ?? false }
+    var profileMode: PenNavigationMode { navigation.mode(for: profileID, excluded: profileExcluded) }
+    var profileApplications: [String: String] {
+        var apps = navigation.applications
+        if let id = profileID { apps[id] = profileName }
+        return apps
+    }
+    func selectProfile(_ id: String) {
+        let name = profileApplications[id] ?? id
+        selectedProfileID = id
+        selectedProfileName = name
+    }
+    func changeNavigation(_ mode: PenNavigationMode) {
+        guard let id = profileID, !(mode == .browse && profileExcluded) else { return }
+        release()
+        navigation.set(mode, for: id, name: profileName)
+        longPressDiagnostic("应用默认模式：\(profileName) → \(mode.title)；已结束当前接触")
+    }
+    func chooseNavigationApplication() {
+        release()
+        let panel = NSOpenPanel()
+        panel.title = "选择笔输入模式的应用"
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let url = panel.url,
+              let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return }
+        selectedProfileID = id
+        selectedProfileName = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? url.deletingPathExtension().lastPathComponent
+        navigation.set(navigation.mode(for: id), for: id, name: profileName)
+    }
     private var longPressTimer: Timer?
     private var applicationObserver: NSObjectProtocol?
     private var compatibilityContact = false
@@ -28,13 +72,28 @@ final class PointerOutput {
     var rightClickCount = 0
     var rightEventCount = 0
 
-    init() {
+    init(defaults: UserDefaults = .standard, observeApplications: Bool = true) {
+        longPress = LongPressPreferences(defaults: defaults)
+        navigation = PenNavigationPreferences(defaults: defaults)
+        guard observeApplications else { return }
+        if let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier {
+            lastExternalApplication = app
+        }
         applicationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            guard let self, self.gesture.hasScheduledClick else { return }
-            self.longPressDiagnostic("长按取消：前台应用切换")
-            self.release()
+        ) { [weak self] notification in
+            guard let self, let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            if app.bundleIdentifier != Bundle.main.bundleIdentifier {
+                self.lastExternalApplication = app
+                self.selectedProfileID = nil; self.selectedProfileName = nil
+            }
+            // An immediate click may activate its own target. Other activation cancels the contact.
+            if app.processIdentifier == self.candidateTarget {
+                self.candidateFrontmost = app.processIdentifier
+            } else {
+                self.longPressDiagnostic("输入结束：前台应用切换")
+                self.release()
+            }
         }
     }
     deinit {
@@ -111,7 +170,8 @@ final class PointerOutput {
             }
             if !send(planned.action, at: planned.point) {
                 // Release only buttons we actually submitted and suppress this contact after a failed post setup.
-                _ = gesture.cancel()
+                let cancelled = gesture.cancelNavigation()
+                emitScroll(cancelled.scroll)
                 if postedLeft { _ = send(.up, at: lastPoint) }
                 if postedRight { _ = send(.rightUp, at: lastPoint) }
                 break
@@ -132,17 +192,16 @@ final class PointerOutput {
     let source = CGEventSource(stateID: .privateState)
     func receive(_ sample: Sample) {
         currentSample = sample
-        if tabletEnabled && sample.inRange && sample.positionValid && !sample.eraser && !inProximity {
-            sendProximity(true, at: mapping.point(x: sample.x, y: sample.y))
-        }
         let contact = sample.touching && sample.inRange && !sample.eraser
         if gesture.isIdle && contact && sample.positionValid {
             pressLocation = mapping.point(x: sample.x, y: sample.y)
             let frontmost = NSWorkspace.shared.frontmostApplication
             let frontmostExcluded = frontmost?.bundleIdentifier.map { longPress.excludes($0) } ?? false
-            let targetApp = longPress.enabled && !frontmostExcluded ? target(at: pressLocation) : nil
+            let targetApp = (longPress.enabled || navigation.hasBrowseApplications) && !frontmostExcluded ? target(at: pressLocation) : nil
             candidateTarget = targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
+            contactMode = navigation.mode(for: targetApp?.bundleIdentifier,
+                    excluded: frontmostExcluded || (targetApp?.bundleIdentifier.map { longPress.excludes($0) } ?? false))
             deferredContact = longPress.enabled && !frontmostExcluded
                 && (targetApp?.bundleIdentifier.map { !longPress.excludes($0) } ?? false)
             compatibilityContact = deferredContact && (targetApp?.bundleIdentifier.map { longPress.usesCompatibility(for: $0) } ?? false)
@@ -150,18 +209,29 @@ final class PointerOutput {
                 longPressDiagnostic("长按判定：目标 \(targetApp?.bundleIdentifier ?? "未知")，前台 \(frontmost?.bundleIdentifier ?? "未知")，\(deferredContact ? "开始计时" : "即时左键（排除或目标未识别）")")
             }
         }
+        if !contact && gesture.isIdle {
+            let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            contactMode = navigation.mode(for: id, excluded: id.map { longPress.excludes($0) } ?? false)
+        }
+        if contactMode == .browse && inProximity { sendProximity(false, at: lastPoint) }
+        if tabletEnabled && contactMode == .pointer && sample.inRange && sample.positionValid && !sample.eraser && !inProximity {
+            sendProximity(true, at: mapping.point(x: sample.x, y: sample.y))
+        }
         if contact { contactSample = sample }
         // A deferred tap is emitted on lift; retain the last actual contact's tablet fields.
         if !contact && gesture.isPending { currentSample = contactSample }
         let wasPending = gesture.isPending
-        let events = gesture.consume(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
-                                     enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled, jitterFilter: longPress.jitterFilter)
+        let result = gesture.consumeNavigation(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
+                                     enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled,
+                                     jitterFilter: longPress.jitterFilter, navigation: contactMode)
+        let events = result.pointer
         if wasPending && !gesture.isPending {
             longPressDiagnostic(events.contains { $0.action == .drag }
                 ? "长按取消：移动超出抖动过滤范围（\(longPress.jitterFilter.title)，\(longPress.jitterFilter.tolerance) 逻辑点），进入拖动"
-                : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围"))
+                : (!result.scroll.isEmpty ? "长按取消：已进入浏览滚动" : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围")))
         }
         emit(events)
+        emitScroll(result.scroll)
         if gesture.hasScheduledClick { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
         if !contact { contactSample = nil }
@@ -171,11 +241,53 @@ final class PointerOutput {
     }
     func release() {
         longPressTimer?.invalidate(); longPressTimer = nil
-        emit(gesture.cancel())
+        let cancelled = gesture.cancelNavigation()
+        emit(cancelled.pointer); emitScroll(cancelled.scroll)
+        if let anchor = postedScrollAnchor { _ = sendScroll(PenScrollEvent(anchor: anchor, phase: .cancelled)) }
         if postedLeft { _ = send(.up, at: lastPoint) }
         if postedRight { _ = send(.rightUp, at: lastPoint) }
         if inProximity { sendProximity(false, at: lastPoint) }
         currentSample = nil; contactSample = nil
+    }
+    private func emitScroll(_ events: [PenScrollEvent]) {
+        for event in events {
+            // A scroll sequence is never part of a later multiple-click sequence.
+            lastRelease = -Double.infinity
+            guard sendScroll(event) else {
+                let cancelled = gesture.cancelNavigation()
+                for end in cancelled.scroll { _ = sendScroll(end) }
+                return
+            }
+        }
+    }
+    @discardableResult private func sendScroll(_ planned: PenScrollEvent) -> Bool {
+        guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                                 wheel1: planned.vertical, wheel2: planned.horizontal, wheel3: 0) else { return false }
+        event.location = planned.anchor
+        lastWarpError = CGWarpMouseCursorPosition(planned.anchor)
+        let ending = planned.phase == .ended || planned.phase == .cancelled
+        guard lastWarpError == .success || ending else { return false }
+        event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        let phase: CGScrollPhase
+        switch planned.phase {
+        case .began: phase = .began
+        case .changed: phase = .changed
+        case .ended: phase = .ended
+        case .cancelled: phase = .cancelled
+        }
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 0)
+        event.post(tap: .cghidEventTap); didPost()
+        postedScrollAnchor = ending ? nil : planned.anchor
+        scrollEventCount += 1
+        if planned.phase == .began {
+            scrollGestureCount += 1
+            longPressDiagnostic("浏览滚动开始：固定落笔位置，纵向优先，无惯性")
+        }
+        if ending { longPressDiagnostic("浏览滚动结束：\(planned.phase == .cancelled ? "已取消" : "抬笔")；未补发单击") }
+        lastPoint = planned.anchor
+        return true
     }
     private func sendProximity(_ entering: Bool, at point: CGPoint) {
         guard let event = CGEvent(source: source) else { return }
@@ -211,7 +323,7 @@ final class PointerOutput {
         guard lastWarpError == .success || action == .up || action == .rightUp else { return false }
         event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
         if action != .move { event.setIntegerValueField(.mouseEventClickState, value: right ? 1 : clickCount) }
-        if tabletEnabled && !right {
+        if tabletEnabled && contactMode == .pointer && !right {
             event.setIntegerValueField(.mouseEventSubtype, value: Int64(CGEventMouseSubtype.tabletPoint.rawValue))
             event.setIntegerValueField(.tabletEventDeviceID, value: tabletID)
             let contact = action == .down || action == .drag
