@@ -211,6 +211,41 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: cadence) { self.textPen(character: 2, down: false, verticalOffset: 20) }
         append(after: cadence) {
             self.check(self.textView.bridgeScrolls > self.textScrollBefore && self.textView.trace.count == self.textTraceBefore, "文字拖选结束后下次滑动恢复滚动")
+            self.output.release(); self.textTraceBefore = self.textView.trace.count
+            self.textScrollBefore = self.textView.bridgeScrolls
+            self.textPen(character: 2); self.textPen(character: 2, down: false)
+        }
+        append(after: cadence) {
+            self.textPen(character: 2, horizontalOffset: 6)
+            self.textPen(character: 2, down: false, horizontalOffset: 6)
+        }
+        append(after: cadence) {
+            let trace = Array(self.textView.trace.dropFirst(self.textTraceBefore))
+            let selection = self.textView.selectedRange()
+            self.check(trace.contains { $0.hasPrefix("down count=2") } &&
+                (self.textView.string as NSString).substring(with: selection) == "alpha", "浏览偏移6点的双击仍实际选词")
+            self.textPen(character: 2, horizontalOffset: 8)
+            self.textPen(character: 2, down: false, horizontalOffset: 8)
+        }
+        append(after: cadence) {
+            let trace = Array(self.textView.trace.dropFirst(self.textTraceBefore))
+            self.check(trace.contains { $0.hasPrefix("down count=3") } && self.textView.selectedRange().length >= "alpha beta gamma".count,
+                "浏览偏移8点的三击仍实际选段")
+            self.check(self.textView.bridgeScrolls == self.textScrollBefore, "偏移连续点按不混发滚动")
+            self.output.release(); self.output.longPress.enabled = false
+            self.output.applicationProfiles.set(.pointer, for: id, name: "本地事件验收")
+            self.pen(); self.pen(0.5 + 6 / 719.0); self.pen(down: false)
+        }
+        append(after: cadence) { self.pen(0.5 + 6 / 719.0); self.pen(0.5 + 6 / 719.0, down: false) }
+        append(after: cadence) {
+            self.check(Array(self.window.receivedDownClickCounts.suffix(2)) == [1, 2], "点按中轻微移动仍可接续双击计数")
+            self.output.release(); self.output.applicationProfiles.set(.drawing, for: id, name: "本地事件验收")
+            self.output.tabletEnabled = true
+            self.pen(); self.pen(0.5 + 6 / 719.0); self.pen(down: false)
+        }
+        append(after: cadence) { self.pen(0.5 + 6 / 719.0); self.pen(0.5 + 6 / 719.0, down: false) }
+        append(after: cadence) {
+            self.check(Array(self.window.receivedDownClickCounts.suffix(2)) == [1, 1], "绘画保留原位移判定，不使用连续点按额外容差")
             self.finish()
         }
         runNext()
@@ -221,7 +256,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         let top = NSScreen.screens.first!.frame.maxY
         pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY) / (bounds.height - 1), down: down)
     }
-    private func textPen(character: Int, down: Bool = true, verticalOffset: CGFloat = 0) {
+    private func textPen(character: Int, down: Bool = true, verticalOffset: CGFloat = 0, horizontalOffset: CGFloat = 0) {
         guard let layout = textView.layoutManager, let container = textView.textContainer else { return }
         layout.ensureLayout(for: container)
         let glyph = layout.glyphIndexForCharacter(at: character)
@@ -231,7 +266,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         let desktop = window.convertPoint(toScreen: windowPoint)
         let top = NSScreen.screens.first!.frame.maxY
         let bounds = output.mapping.bounds
-        pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY + verticalOffset) / (bounds.height - 1), down: down)
+        pen((desktop.x - bounds.minX + horizontalOffset) / (bounds.width - 1), (top - desktop.y - bounds.minY + verticalOffset) / (bounds.height - 1), down: down)
     }
     private func pen(_ x: Double = 0.5, _ y: Double = 0.5, down: Bool = true) {
         output.receive(Sample(x: x, y: y, touching: down, inRange: true,
@@ -267,7 +302,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             "textTrace": textView.trace, "textSelectionLocation": textView.selectedRange().location, "textSelectionLength": textView.selectedRange().length,
             "AXTrusted": AXIsProcessTrusted(), "postAccess": CGPreflightPostEventAccess(),
             "postedDown": output.downCount, "postedUp": output.upCount, "postedScroll": output.scrollEventCount,
-            "warpError": output.lastWarpError.rawValue, "windowTrace": window.trace,
+            "warpError": output.lastWarpError.rawValue, "windowTrace": window.trace, "receivedDownClickCounts": window.receivedDownClickCounts,
             "originalWindowFrame": NSStringFromRect(originalFrame), "windowMovable": window.isMovable,
             "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
@@ -316,10 +351,12 @@ private final class EventCheckScrollRegion: NSView {
 
 private final class EventCheckWindow: NSWindow {
     var trace: [String] = []
+    var receivedDownClickCounts: [Int] = []
     override func sendEvent(_ event: NSEvent) {
         if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag &&
             [.leftMouseDown, .leftMouseDragged, .leftMouseUp].contains(event.type) {
-            trace.append("type=\(event.type.rawValue) point=\(event.locationInWindow) frame=\(frame) buttons=\(NSEvent.pressedMouseButtons)")
+            trace.append("type=\(event.type.rawValue) count=\(event.clickCount) point=\(event.locationInWindow) frame=\(frame) buttons=\(NSEvent.pressedMouseButtons)")
+            if event.type == .leftMouseDown { receivedDownClickCounts.append(event.clickCount) }
         }
         super.sendEvent(event)
     }

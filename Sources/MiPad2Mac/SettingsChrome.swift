@@ -304,10 +304,11 @@ struct SettingsScrollTrack: NSViewRepresentable {
 /// Let SwiftUI own native tracking, integer stepping, geometry and Liquid Glass feedback.
 struct SettingsIntegerSlider: View {
     @Binding var value: Double
+    var label = "长按防抖"
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
         VStack(spacing: 4) {
-            Slider(value: Binding(get: { value }, set: { value = min(18, max(0, $0.rounded())) }), in: 0...18) { Text("长按防抖") }
+            Slider(value: Binding(get: { value }, set: { value = min(18, max(0, $0.rounded())) }), in: 0...18) { Text(label) }
                 .accessibilityAdjustableAction { direction in
                     guard isEnabled else { return }
                     switch direction {
@@ -327,6 +328,7 @@ struct SettingsIntegerSlider: View {
             tickLabels.frame(height: 16)
         }
         .labelsHidden()
+        .accessibilityLabel(label)
         .controlSize(.regular)
         .accessibilityValue("\(Int(value))，范围0到18")
     }

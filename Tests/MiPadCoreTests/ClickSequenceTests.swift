@@ -60,3 +60,32 @@ import Testing
     sequence.end(now: 2.2, interval: 0.5)
     #expect(sequence.begin(at: .zero, now: 1, interval: 0.5) == 1)
 }
+@Test func spatialJitterAllowsOffsetClicksAndSmallContactMovement() {
+    var sequence = ClickSequence()
+    #expect(sequence.begin(at: .zero, now: 0, interval: 0.5, extraTolerance: 4) == 1)
+    sequence.drag(to: CGPoint(x: 6, y: 0))
+    sequence.end(now: 0.05, interval: 0.5)
+    #expect(sequence.begin(at: CGPoint(x: 6, y: 0), now: 0.1, interval: 0.5, extraTolerance: 4) == 2)
+    sequence.end(now: 0.15, interval: 0.5)
+    #expect(sequence.nextCount(at: CGPoint(x: 8, y: 0), now: 0.2, interval: 0.5, extraTolerance: 4) == 3)
+    #expect(sequence.begin(at: CGPoint(x: 8, y: 0), now: 0.2, interval: 0.5, extraTolerance: 4) == 3)
+    sequence.drag(to: CGPoint(x: 16, y: 0)); sequence.end(now: 0.25, interval: 0.5)
+    #expect(sequence.nextCount(at: CGPoint(x: 8, y: 0), now: 0.3, interval: 0.5, extraTolerance: 4) == 1)
+}
+@Test func jitterNeverChainsAcrossGrowingDistanceOrExtendsTimeLimit() {
+    var sequence = ClickSequence()
+    _ = sequence.begin(at: .zero, now: 0, interval: 0.5, extraTolerance: 4)
+    sequence.end(now: 0.05, interval: 0.5)
+    #expect(sequence.nextCount(at: CGPoint(x: 9, y: 0), now: 0.1, interval: 0.5, extraTolerance: 4) == 1)
+    _ = sequence.begin(at: CGPoint(x: 6, y: 0), now: 0.1, interval: 0.5, extraTolerance: 4)
+    sequence.end(now: 0.15, interval: 0.5)
+    #expect(sequence.nextCount(at: CGPoint(x: 12, y: 0), now: 0.2, interval: 0.5, extraTolerance: 4) == 1)
+    #expect(sequence.nextCount(at: CGPoint(x: 6, y: 0), now: 0.6, interval: 0.5, extraTolerance: 18) == 1)
+    // Disabled tolerance and drawing retain the original per-tap distance behavior.
+    sequence.reset()
+    for index in 0..<3 {
+        let time = Double(index) * 0.1
+        #expect(sequence.begin(at: CGPoint(x: Double(index) * 3, y: 0), now: time, interval: 0.5) == Int64(index + 1))
+        sequence.end(now: time + 0.05, interval: 0.5)
+    }
+}

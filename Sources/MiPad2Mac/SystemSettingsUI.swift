@@ -209,6 +209,18 @@ struct SettingsDetail: View {
                     })).disabled(!app.output.longPress.enabled)
                     settingDescription("数值越大，越能容忍笔尖抖动；开始拖动也需移动更远。")
                 }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("连续点按防抖")
+                        Spacer()
+                        Text(clickJitterValueLabel).monospacedDigit().foregroundStyle(.secondary)
+                        ExplanationButton(text: "允许双击、三击的落笔位置稍有偏移，并放宽点按中轻微移动的判定。0–18表示增加的容差，单位为逻辑点，默认中（4）。\n\n无（0）保留原判定：落笔间距小于5点，点按中移动小于4点。默认允许间距小于9点、移动小于8点；启用额外容差时，连续点击以第一下的位置为基准。\n\n数值越大，邻近点击越容易合并。不改变系统双击时间、鼠标移动、开始滚动的门槛或绘画输出。设置自动保存，与长按防抖分开。", label: "连续点按防抖说明")
+                    }
+                    SettingsIntegerSlider(value: Binding(get: { app.output.clickPreferences.jitterTolerance }, set: { value in
+                        model.act { app.output.changeClickTolerance(value) }
+                    }), label: "连续点按防抖")
+                    settingDescription("放宽双击、三击的位置判定；数值较大时，邻近点击也更容易合并。")
+                }
                 LabeledContent("虚拟按键") {
                     Text("暂不支持").foregroundStyle(.secondary)
                     ExplanationButton(text: "已知笔接口中未检测到捏、双击或滑动笔杆的可用控制数据，暂无法映射为按键。", label: "虚拟按键暂不支持的原因")
@@ -227,6 +239,12 @@ struct SettingsDetail: View {
         let number = String(Int(level.tolerance))
         if level == .medium { return "中 · 4（默认）" }
         return LongPressJitterFilter.landmarks.contains(level) ? "\(level.title) · \(number)" : number
+    }
+    private var clickJitterValueLabel: String {
+        let value = app.output.clickPreferences.jitterTolerance
+        let level = LongPressJitterFilter(tolerance: value)
+        if value == ClickPreferences.defaultTolerance { return "中 · 4（默认）" }
+        return LongPressJitterFilter.landmarks.contains(level) ? "\(level.title) · \(Int(value))" : String(Int(value))
     }
     private var longPressHelp: some View {
         VStack(spacing: 0) {

@@ -17,6 +17,7 @@ final class PointerOutput {
     let longPress: LongPressPreferences
     let navigation: PenNavigationPreferences
     let applicationProfiles: PenApplicationPreferences
+    let clickPreferences: ClickPreferences
     private var lastExternalApplication: NSRunningApplication?
     var selectedProfileID: String?
     private var selectedProfileName: String?
@@ -72,6 +73,7 @@ final class PointerOutput {
     private var postedRight = false
     private var clicks = ClickSequence()
     private var contactStarted: TimeInterval = 0
+    private var contactClickTolerance = 0.0
     var rightClickCount = 0
     var rightEventCount = 0
 
@@ -79,6 +81,7 @@ final class PointerOutput {
         longPress = LongPressPreferences(defaults: defaults)
         navigation = PenNavigationPreferences(defaults: defaults)
         applicationProfiles = PenApplicationPreferences(defaults: defaults)
+        clickPreferences = ClickPreferences(defaults: defaults)
         guard observeApplications else { return }
         if let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier {
             lastExternalApplication = app
@@ -171,6 +174,9 @@ final class PointerOutput {
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
         release(); edit(longPress)
     }
+    func changeClickTolerance(_ value: Double) {
+        release(); clickPreferences.jitterTolerance = value
+    }
     func addCompatibilityApplication() {
         release()
         let panel = NSOpenPanel()
@@ -210,7 +216,8 @@ final class PointerOutput {
     private func emit(_ events: [PointerEvent]) {
         for planned in events {
             if planned.action == .down {
-                clickCount = clicks.begin(at: planned.point, now: contactStarted, interval: NSEvent.doubleClickInterval)
+                clickCount = clicks.begin(at: planned.point, now: contactStarted, interval: NSEvent.doubleClickInterval,
+                                          extraTolerance: contactClickTolerance)
             }
             if planned.action == .drag { clicks.drag(to: planned.point) }
             if planned.action == .rightDown { clicks.reset() }
@@ -245,6 +252,7 @@ final class PointerOutput {
             let hit = (longPress.enabled || applicationProfiles.hasBrowseApplications) ? target(at: pressLocation) : nil
             let targetApp = hit?.app
             let appMode = applicationProfiles.mode(for: targetApp?.bundleIdentifier ?? frontmost?.bundleIdentifier)
+            contactClickTolerance = appMode == .drawing ? 0 : clickPreferences.jitterTolerance
             candidateTarget = targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
             // Only recognized content scrolls. Window chrome and unidentified areas retain the pointer.
@@ -252,7 +260,8 @@ final class PointerOutput {
             // A held second/third tap explicitly selects text instead of starting a new scroll.
             // Preview only: emit(.down) consumes the count once, with the physical press time.
             let multiTapSelection = contactMode == .browse
-                && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval) > 1
+                && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval,
+                                   extraTolerance: contactClickTolerance) > 1
             if multiTapSelection { contactMode = .pointer }
             if appMode == .browse {
                 let path = hit?.nodes.map { node in
