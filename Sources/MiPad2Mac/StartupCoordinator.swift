@@ -66,9 +66,10 @@ final class StartupCoordinator: NSObject, NSWindowDelegate {
     func presentNotices(app: AppDelegate) {
         guard !notices.isEmpty else { return }
         if noticeWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 510),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 610, height: 580),
                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            w.title = "更新后的权限检查"; w.minSize = NSSize(width: 520, height: 440)
+            w.title = "更新后的权限检查"; w.titleVisibility = .hidden
+            w.minSize = NSSize(width: 560, height: 540)
             w.isReleasedWhenClosed = false; w.delegate = self; w.center()
             w.contentViewController = NSHostingController(rootView: MigrationNoticeView(model: app.tabs.model, coordinator: self))
             noticeWindow = w
@@ -83,37 +84,76 @@ final class StartupCoordinator: NSObject, NSWindowDelegate {
     // Window close/later never acknowledges a notice. Pending suppresses duplicate permission windows this session.
 }
 
+private final class MigrationNoticeState: ObservableObject { @Published var section = 0 }
+
 private struct MigrationNoticeView: View {
+    @StateObject private var state = MigrationNoticeState()
     @ObservedObject var model: SettingsPresentation
     let coordinator: StartupCoordinator
     var app: AppDelegate { model.app }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("更新后的权限检查").font(.title2.bold())
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("更新后的权限检查").font(.title2.bold())
+                if state.section == 0 {
+                ForEach(coordinator.notices, id: \.rule.key) { item in
+                    Text(item.unknownSource ? "如果从旧的本地签名版本升级，macOS可能需要重新确认权限。" : item.rule.cause)
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                }
+                Picker("权限帮助", selection: $state.section) {
+                    Text("权限检查").tag(0); Text("重新添加权限").tag(1)
+                }.pickerStyle(.segmented).labelsHidden().padding(.top, 8)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+            Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(coordinator.notices, id: \.rule.key) { item in
-                        Text(item.unknownSource ? "如果你从旧的本地签名版本升级，macOS可能需要为当前应用重新确认权限。" : item.rule.cause)
+                VStack(alignment: .leading, spacing: 18) {
+                    if state.section == 0 {
+                    SettingsSection {
+                        LabeledContent("控制与事件发送") {
+                            stateText(app.accessibilityAllowed && app.postAllowed ? .granted : .denied)
+                            Button("系统设置…") { model.act { app.requestPermissions() } }
+                                .disabled(app.accessibilityAllowed && app.postAllowed)
+                        }
+                        if app.accessibilityAllowed != app.postAllowed {
+                            Text("控制：\(app.accessibilityAllowed ? "已授权" : "未授权") · 事件发送：\(app.postAllowed ? "已授权" : "未授权")")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        LabeledContent("输入监控") {
+                            stateText(inputState)
+                            Button("系统设置…") { model.act { app.requestInputPermission() } }.disabled(inputState == .granted)
+                        }
+                        HStack {
+                            Text(app.permissionsReady ? "权限已就绪，无需重新操作。" : "只需处理未授权或待确认的项目。")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Spacer(minLength: 8)
+                            Button("重新检查") { model.act { app.refreshPermissions() } }
+                        }
+                    } header: { Text("当前权限") } footer: { EmptyView() }
+                    SettingsSection {
+                        Button { state.section = 1 } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("系统设置已开启，仍显示未授权？").fontWeight(.semibold).foregroundStyle(Color.accentColor)
+                                    Text("查看重新添加当前应用的三步指引").font(.callout).foregroundStyle(.secondary)
+                                }
+                                Spacer(); Image(systemName: "chevron.right").font(.callout).foregroundStyle(.secondary)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
-                    Text("已授权项目无需重新操作。").foregroundStyle(.secondary)
-                    permission("控制", state: app.accessibilityAllowed ? .granted : .denied) { app.requestPermissions() }
-                    permission("事件发送", state: app.postAllowed ? .granted : .denied) { app.requestPermissions() }
-                    permission("输入监控", state: inputState) { app.requestInputPermission() }
-                    Button("重新检查") { model.act { app.refreshPermissions() } }
-                    DisclosureGroup("系统设置已开启，但仍显示未授权？") {
-                        Text("1. 确认正在运行的是当前安装的MiPad2Mac，正常退出其他副本。\n2. 打开系统设置 → 隐私与安全，在对应权限中移除旧条目，再添加当前应用并开启。\n3. 正常退出并重新打开MiPad2Mac，再检查权限。")
-                            .font(.callout).foregroundStyle(.secondary).padding(.top, 8)
+                    } else {
+                        SettingsSection { PermissionRecoveryInstructions() }
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
+                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            }.background(Color(nsColor: .textBackgroundColor))
             Divider()
             HStack {
-                Text("确认说明不会更改系统权限。").font(.caption).foregroundStyle(.secondary)
-                Spacer()
+                Text("确认说明不会更改系统权限。").font(.footnote).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
                 Button("稍后") { coordinator.later() }
                 Button("我已了解") { coordinator.acknowledge() }.keyboardShortcut(.defaultAction)
-            }
-        }.padding(24)
+            }.padding(.horizontal, 20).padding(.vertical, 14)
+        }.controlSize(.regular).labeledContentStyle(SettingsValueStyle())
     }
     var inputState: PermissionState {
         let access = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
@@ -121,12 +161,65 @@ private struct MigrationNoticeView: View {
         if access == kIOHIDAccessTypeDenied { return .denied }
         return .unknown
     }
-    func permission(_ title: String, state: PermissionState, action: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title); Spacer()
-            Text(state == .granted ? "已授权" : (state == .denied ? "未授权" : "待确认"))
-                .foregroundStyle(state == .granted ? Color.green : Color.secondary)
-            Button("系统设置…", action: action).disabled(state == .granted)
+    func stateText(_ state: PermissionState) -> some View {
+        Text(state == .granted ? "已授权" : (state == .denied ? "未授权" : "待确认"))
+            .foregroundStyle(state == .granted ? Color.green : Color.secondary)
+    }
+}
+
+/// Shared by the permission page and migration window; keeps recovery separate from permission status.
+private final class PermissionRecoveryState: ObservableObject { @Published var expanded = false }
+
+struct PermissionRecoverySection: View {
+    @StateObject private var state = PermissionRecoveryState()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        SettingsSection {
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { state.expanded.toggle() }
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                            .rotationEffect(.degrees(state.expanded ? 90 : 0)).frame(width: 12).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("系统设置已开启，仍显示未授权？").fontWeight(.semibold).foregroundStyle(Color.accentColor)
+                            Text("重新添加当前应用的权限").font(.callout).foregroundStyle(.secondary)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityValue(state.expanded ? "已展开" : "已收起")
+                    .accessibilityHint("显示重新添加权限的三步指引")
+                if state.expanded {
+                    PermissionRecoveryInstructions().transition(.opacity).padding(.top, 2)
+                }
+            }
+        }
+    }
+}
+
+struct PermissionRecoveryInstructions: View {
+    var controlName: String {
+        if #available(macOS 27, *) { return "设备控制和数据访问" }; return "辅助功能"
+    }
+    var body: some View {
+                    VStack(alignment: .leading, spacing: 14) {
+                        step("1", title: "退出MiPad2Mac", detail: "从菜单栏HID选择退出MiPad2Mac，不要只关闭窗口。其他旧副本也需正常退出。")
+                        Divider()
+                        step("2", title: "移除旧条目，添加当前应用", detail: "系统设置 → 隐私与安全 → \(controlName)或输入监控。只处理检查未通过的项目。\n选中MiPad2Mac，点“−”移除；再点“+”，添加当前安装的MiPad2Mac.app并开启权限。")
+                        Button("在访达中显示当前应用") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                            .padding(.leading, 28)
+                        Text("请勿选择旧版或安装镜像中的副本。").font(.footnote).foregroundStyle(.secondary).padding(.leading, 28)
+                        Divider()
+                        step("3", title: "重开应用，重新检查", detail: "打开刚添加的MiPad2Mac，回到权限页点重新检查。若系统要求退出后重新打开，请按提示操作。")
+                    }
+    }
+    func step(_ number: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(number).font(.callout.weight(.semibold)).foregroundStyle(Color.accentColor).frame(width: 18)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(.init(detail)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
