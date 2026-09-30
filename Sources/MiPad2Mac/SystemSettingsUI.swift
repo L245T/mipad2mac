@@ -19,7 +19,7 @@ final class SettingsPresentation: ObservableObject {
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
-            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue)]
+            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue]
             + (app.monitoring ? [app.countsLabel.stringValue, app.sampleLabel.stringValue, app.packetLabel.stringValue, app.controlLabel.stringValue, app.testRecord.displayText] : [])
         let next = fields.joined(separator: "\u{1f}")
         if next != signature { signature = next; generation += 1 }
@@ -408,9 +408,12 @@ struct SettingsDetail: View {
                     ForEach(UpdateChannel.allCases, id: \.rawValue) { Text($0.title).tag($0) }
                 }
                 LabeledContent("软件更新") { Button("检查更新…") { app.checkUpdates() } }
-                Toggle("启动时检查更新", isOn: Binding(get: { app.autoUpdate.state == .on }, set: { value in model.act { app.autoUpdate.state = value ? .on : .off; app.updatePreferenceChanged() } }))
+                Toggle("自动检查更新", isOn: Binding(get: { app.autoUpdate.state == .on }, set: { value in model.act { app.autoUpdate.state = value ? .on : .off; app.updatePreferenceChanged() } }))
+                SettingsPicker("检查周期", selection: Binding(get: { app.updateChecker.interval }, set: { value in model.act { app.updateChecker.selectInterval(value) } })) {
+                    ForEach(UpdateInterval.allCases, id: \.rawValue) { Text($0.title).tag($0) }
+                }.disabled(app.autoUpdate.state != .on)
                 Text(app.updateLabel.stringValue).font(.callout).foregroundStyle(.secondary)
-            } header: { Text("版本更新") } footer: { footerNote("稳定版仅检查正式发布；Beta 版也检查预发布。各渠道每天最多自动检查一次，不自动下载或安装。") }
+            } header: { Text("版本更新") } footer: { footerNote("稳定版仅检查正式发布；Beta渠道也检查预发布。自动检查不会下载或安装更新，手动检查不受所选周期限制。") }
             SettingsSection("赞助") {
                 Text("如果这个工具对你有帮助，欢迎自愿赞助。")
                 HStack(alignment: .top, spacing: 24) { sponsor("微信", file: "wechat", ext: "png"); sponsor("支付宝", file: "alipay", ext: "jpg") }.frame(maxWidth: .infinity)

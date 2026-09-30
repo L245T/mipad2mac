@@ -26,9 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let sponsorSection = SponsorSection()
     let controlSummary = NativeLayout.text("准备启用笔控制")
     let updateLabel = NativeLayout.text("可按所选渠道检查 GitHub Release。")
-    let autoUpdate = NativeToggle("启动时检查更新（每天最多一次）")
+    let autoUpdate = NativeToggle("自动检查更新")
     let controlMode = NSSegmentedControl(labels: ["macOS 原生处理", "MiPad2Mac 控制"], trackingMode: .selectOne, target: nil, action: nil)
     let menuState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let menuUpdateNotice = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
     let menuTablet = NSMenuItem(title: "压力与倾斜输出", action: nil, keyEquivalent: "")
     let menuScreens = NSMenuItem(title: "目标显示器", action: nil, keyEquivalent: "")
@@ -70,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var accessibilityAllowed = false
     var postAllowed = false
     var inputAllowed = false
+    var readerStartupDeferred = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let startupSource = SystemStartupSource.detect(NSAppleEventManager.shared().currentAppleEvent)
@@ -94,19 +96,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         output.longPressDiagnostic = { [weak self] message in self?.testRecord.append(message) }
         output.didPost = { [weak self] in self?.reader.measurement?.recordPost(at: ProcessInfo.processInfo.systemUptime) }
         applyMonitoring()
-        reader.start()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.refreshStats() }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         NotificationCenter.default.addObserver(self, selector: #selector(displayChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.disable() }
         refreshStats()
         startupCoordinator.initialize(current: CurrentReleaseIdentity.snapshot(), systemSource: startupSource)
+        // Do not implicitly open a protected input device before the startup permission decision.
+        readerStartupDeferred = !inputAllowed
+        if !readerStartupDeferred { reader.start() }
         if startupCoordinator.presentation.showMainWindow { presentMainWindow() }
         if startupCoordinator.presentation.showMigrationNotice { startupCoordinator.presentNotices(app: self) }
         attemptAutoStart()
         updateChecker.changed = { [weak self] text in self?.updateLabel.stringValue = text }
         updateLabel.stringValue = updateChecker.idleMessage
-        updateChecker.check(manual: false, window: window)
+        updateChecker.start()
 
     }
 
@@ -156,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         statusItem.button?.setAccessibilityLabel("MiPad2Mac 控制菜单")
         let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false
         menuState.isEnabled = false; menu.addItem(menuState)
+        menuUpdateNotice.isEnabled = false; menuUpdateNotice.isHidden = true; menu.addItem(menuUpdateNotice)
         menuControl.target = self; menuControl.action = #selector(menuToggle); menu.addItem(menuControl)
         menuTablet.target = self; menuTablet.action = #selector(menuToggleTablet); menu.addItem(menuTablet)
         menuTablet.state = output.tabletEnabled ? .on : .off
@@ -173,6 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func menuWillOpen(_ menu: NSMenu) {
         menuState.title = "笔接口：\(reader.deviceCount > 0 ? "已连接" : "未连接") · \(enabled ? "控制中" : "已暂停")"
+        menuUpdateNotice.title = updateChecker.availableRelease.map { "发现更新：" + $0.tag_name } ?? ""
+        menuUpdateNotice.isHidden = updateChecker.availableRelease == nil
         menuControl.title = enabled ? "暂停鼠标控制" : (automaticControl.requested ? "取消软件控制" : "启用鼠标控制")
         menuControl.isEnabled = true
         menuTablet.state = output.tabletEnabled ? .on : .off
@@ -214,7 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
     @objc func checkUpdates() { tabs.selectTabViewItem(at: 4); showWindow(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
-        UserDefaults.standard.set(autoUpdate.state == .on, forKey: "checkUpdatesAutomatically")
+        updateChecker.setAutomatically(autoUpdate.state == .on)
     }
 
     func refreshScreens() {
@@ -321,6 +328,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             accessibilityAllowed = AXIsProcessTrusted()
             postAllowed = CGPreflightPostEventAccess()
             inputAllowed = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+            if readerStartupDeferred && inputAllowed {
+                readerStartupDeferred = false; reader.start()
+            }
             settingsPage.refresh()
             permissionCheckedAt = ProcessInfo.processInfo.systemUptime
         }
@@ -543,7 +553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         showWindow(); return true
     }
     @objc func quit() { NSApp.terminate(nil) }
-    func applicationWillTerminate(_ notification: Notification) { disable(); reader.stop(); timer?.invalidate() }
+    func applicationWillTerminate(_ notification: Notification) { disable(); reader.stop(); timer?.invalidate(); updateChecker.stop() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
