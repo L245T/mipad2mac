@@ -212,7 +212,10 @@ struct SettingsDetail: View {
                     })).disabled(!app.output.longPress.enabled)
                     settingDescription("数值越大，越能容忍笔尖抖动；开始拖动也需移动更远。")
                 }
-                LabeledContent("虚拟按键") { Text("研发中").foregroundStyle(.secondary); help("捏、双击和滑动笔杆未在已知笔接口观察到可用控制数据，目前不映射功能。") }
+                LabeledContent("虚拟按键") {
+                    Text("暂不支持").foregroundStyle(.secondary)
+                    ExplanationButton(text: "已知笔接口中未检测到捏、双击或滑动笔杆的可用控制数据，暂无法映射为按键。", label: "虚拟按键暂不支持的原因")
+                }
             } header: { Text("笔输入") } footer: { EmptyView() }
             SettingsSection {
                 ForEach(app.output.longPress.exclusions.keys.sorted(), id: \.self) { id in
@@ -227,7 +230,10 @@ struct SettingsDetail: View {
                 footerNote("这些应用保持即时落笔，包含工具栏在内均不触发长按。绘画前请将所用应用加入名单。普通应用轻点在抬笔时单击；移动超过轻微抖动范围后开始拖动。")
             }
             SettingsSection("手指输入") {
-                LabeledContent("状态") { Text("研发中").foregroundStyle(.secondary) }
+                LabeledContent("状态") {
+                    Text("暂不支持").foregroundStyle(.secondary)
+                    ExplanationButton(text: "已分析的平板固件在Mac连接模式下不转发手指触摸数据，本程序目前无法接入。", label: "手指输入暂不支持的原因")
+                }
             }
         }
     }
