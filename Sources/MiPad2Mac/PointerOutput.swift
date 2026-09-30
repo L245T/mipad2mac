@@ -16,6 +16,7 @@ final class PointerOutput {
     private var gesture = LongPressGesture()
     let longPress: LongPressPreferences
     let navigation: PenNavigationPreferences
+    let applicationProfiles: PenApplicationPreferences
     private var lastExternalApplication: NSRunningApplication?
     var selectedProfileID: String?
     private var selectedProfileName: String?
@@ -24,12 +25,12 @@ final class PointerOutput {
     var scrollGestureCount = 0
     private var postedScrollAnchor: CGPoint?
 
-    var profileID: String? { selectedProfileID ?? lastExternalApplication?.bundleIdentifier }
+    var profileID: String? { (selectedProfileID ?? lastExternalApplication?.bundleIdentifier)?.lowercased() }
     var profileName: String { selectedProfileName ?? lastExternalApplication?.localizedName ?? "请先选择应用" }
-    var profileExcluded: Bool { profileID.map { longPress.excludes($0) } ?? false }
-    var profileMode: PenNavigationMode { navigation.mode(for: profileID, excluded: profileExcluded) }
+    var profileExcluded: Bool { profileMode == .drawing }
+    var profileMode: PenApplicationMode { applicationProfiles.mode(for: profileID) }
     var profileApplications: [String: String] {
-        var apps = navigation.applications
+        var apps = applicationProfiles.applications
         if let id = profileID { apps[id] = profileName }
         return apps
     }
@@ -38,16 +39,16 @@ final class PointerOutput {
         selectedProfileID = id
         selectedProfileName = name
     }
-    func changeNavigation(_ mode: PenNavigationMode) {
-        guard let id = profileID, !(mode == .browse && profileExcluded) else { return }
+    func changeNavigation(_ mode: PenApplicationMode) {
+        guard let id = profileID else { return }
         release()
-        navigation.set(mode, for: id, name: profileName)
+        applicationProfiles.set(mode, for: id, name: profileName)
         longPressDiagnostic("应用默认模式：\(profileName) → \(mode.title)；已结束当前接触")
     }
     func chooseNavigationApplication() {
         release()
         let panel = NSOpenPanel()
-        panel.title = "选择笔输入模式的应用"
+        panel.title = "选择应用笔设置"
         panel.allowedContentTypes = [.applicationBundle]
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
@@ -57,7 +58,7 @@ final class PointerOutput {
         selectedProfileName = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
             ?? url.deletingPathExtension().lastPathComponent
-        navigation.set(navigation.mode(for: id), for: id, name: profileName)
+        applicationProfiles.set(applicationProfiles.mode(for: id), for: id, name: profileName)
     }
     private var longPressTimer: Timer?
     private var applicationObserver: NSObjectProtocol?
@@ -77,6 +78,7 @@ final class PointerOutput {
     init(defaults: UserDefaults = .standard, observeApplications: Bool = true) {
         longPress = LongPressPreferences(defaults: defaults)
         navigation = PenNavigationPreferences(defaults: defaults)
+        applicationProfiles = PenApplicationPreferences(defaults: defaults)
         guard observeApplications else { return }
         if let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier {
             lastExternalApplication = app
@@ -105,7 +107,12 @@ final class PointerOutput {
     }
     // AX hit testing identifies the application under the pen, including inactive windows.
     // Unknown targets take the immediate path; never guess that they are safe to defer.
-    private func target(at point: CGPoint) -> NSRunningApplication? {
+    private struct PenTarget {
+        let app: NSRunningApplication?
+        let region: PenHitRegion
+    }
+    private func target(at point: CGPoint) -> PenTarget? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.1
         var element: AXUIElement?
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.05)
@@ -122,27 +129,44 @@ final class PointerOutput {
         }
         let app = NSRunningApplication(processIdentifier: pid)
         if app?.bundleIdentifier == nil { longPressDiagnostic("长按目标没有应用标识：PID \(pid)") }
-        return app
+        var roles: [String] = []
+        var ancestor = element
+        for _ in 0..<12 {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { break }
+            AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, remaining)))
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(ancestor, kAXRoleAttribute as CFString, &value) == .success,
+                  let role = value as? String else { break }
+            roles.append(role)
+            if role == kAXWindowRole { break }
+            let parentRemaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard parentRemaining > 0 else { break }
+            AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, parentRemaining)))
+            guard AXUIElementCopyAttributeValue(ancestor, kAXParentAttribute as CFString, &value) == .success,
+                  let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { break }
+            ancestor = unsafeBitCast(value, to: AXUIElement.self)
+        }
+        return PenTarget(app: app, region: PenHitRegion.classify(roles: roles))
     }
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
         release(); edit(longPress)
     }
-    func addExcludedApplication(compatibility: Bool = false) {
+    func addCompatibilityApplication() {
         release()
         let panel = NSOpenPanel()
-        panel.title = compatibility ? "选择使用右键兼容模式的应用" : "选择不使用长按右键的绘画应用"
+        panel.title = "选择使用右键兼容模式的应用"
         panel.allowedContentTypes = [.applicationBundle]
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         guard panel.runModal() == .OK, let url = panel.url,
               let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return }
         changeLongPress { settings in
-            var apps = compatibility ? settings.compatibilityApplications : settings.exclusions
+            var apps = settings.compatibilityApplications
             apps[id] = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
                 ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
                 ?? url.deletingPathExtension().lastPathComponent
-            if compatibility { settings.compatibilityApplications = apps }
-            else { settings.exclusions = apps }
+            settings.compatibilityApplications = apps
         }
     }
     func resetConnection() { release(); gesture.reset() }
@@ -153,7 +177,7 @@ final class PointerOutput {
             self.longPressTimer = nil
             guard self.gesture.hasScheduledClick else { return }
             guard let candidateTarget = self.candidateTarget,
-                  self.target(at: self.pressLocation)?.processIdentifier == candidateTarget,
+                  self.target(at: self.pressLocation)?.app?.processIdentifier == candidateTarget,
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == self.candidateFrontmost else {
                 self.longPressDiagnostic("长按取消：到时目标应用或前台应用已变化/无法识别")
                 self.release(); return
@@ -199,22 +223,25 @@ final class PointerOutput {
             contactStarted = ProcessInfo.processInfo.systemUptime
             pressLocation = mapping.point(x: sample.x, y: sample.y)
             let frontmost = NSWorkspace.shared.frontmostApplication
-            let frontmostExcluded = frontmost?.bundleIdentifier.map { longPress.excludes($0) } ?? false
-            let targetApp = (longPress.enabled || navigation.hasBrowseApplications) && !frontmostExcluded ? target(at: pressLocation) : nil
+            let hit = (longPress.enabled || applicationProfiles.hasBrowseApplications) ? target(at: pressLocation) : nil
+            let targetApp = hit?.app
+            let appMode = applicationProfiles.mode(for: targetApp?.bundleIdentifier ?? frontmost?.bundleIdentifier)
             candidateTarget = targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
-            contactMode = navigation.mode(for: targetApp?.bundleIdentifier,
-                    excluded: frontmostExcluded || (targetApp?.bundleIdentifier.map { longPress.excludes($0) } ?? false))
-            deferredContact = longPress.enabled && !frontmostExcluded
-                && (targetApp?.bundleIdentifier.map { !longPress.excludes($0) } ?? false)
-            compatibilityContact = deferredContact && (targetApp?.bundleIdentifier.map { longPress.usesCompatibility(for: $0) } ?? false)
+            // Only recognized content scrolls. Window chrome and unidentified areas retain the pointer.
+            contactMode = appMode == .browse && hit?.region == .content ? .browse : .pointer
+            deferredContact = longPress.enabled && appMode != .drawing && hit?.region != .chrome && targetApp != nil
+            compatibilityContact = deferredContact && longPress.compatibilityEnabled
+                && (targetApp?.bundleIdentifier.map { id in
+                    longPress.compatibilityApplications.keys.contains { $0.caseInsensitiveCompare(id) == .orderedSame }
+                } ?? false)
             if longPress.enabled {
                 longPressDiagnostic("长按判定：目标 \(targetApp?.bundleIdentifier ?? "未知")，前台 \(frontmost?.bundleIdentifier ?? "未知")，\(deferredContact ? "开始计时" : "即时左键（排除或目标未识别）")")
             }
         }
         if !contact && gesture.isIdle {
             let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-            contactMode = navigation.mode(for: id, excluded: id.map { longPress.excludes($0) } ?? false)
+            contactMode = applicationProfiles.mode(for: id) == .browse ? .browse : .pointer
         }
         if contactMode == .browse && inProximity { sendProximity(false, at: lastPoint) }
         if tabletEnabled && contactMode == .pointer && sample.inRange && sample.positionValid && !sample.eraser && !inProximity {
@@ -233,8 +260,9 @@ final class PointerOutput {
                 ? "长按取消：移动超出抖动过滤范围（\(longPress.jitterFilter.title)，\(longPress.jitterFilter.tolerance) 逻辑点），进入拖动"
                 : (!result.scroll.isEmpty ? "长按取消：已进入浏览滚动" : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围")))
         }
-        emit(events)
+        // Scroll routing stays at the original content; the subsequent move follows the live pen.
         emitScroll(result.scroll)
+        emit(events)
         if gesture.hasScheduledClick { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
         if !contact { contactSample = nil }
@@ -268,9 +296,7 @@ final class PointerOutput {
         guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
                                  wheel1: planned.vertical, wheel2: planned.horizontal, wheel3: 0) else { return false }
         event.location = planned.anchor
-        lastWarpError = CGWarpMouseCursorPosition(planned.anchor)
         let ending = planned.phase == .ended || planned.phase == .cancelled
-        guard lastWarpError == .success || ending else { return false }
         event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         let phase: CGScrollPhase
@@ -287,10 +313,9 @@ final class PointerOutput {
         scrollEventCount += 1
         if planned.phase == .began {
             scrollGestureCount += 1
-            longPressDiagnostic("浏览滚动开始：固定落笔位置，纵向优先，无惯性")
+            longPressDiagnostic("浏览滚动开始：固定内容目标，光标跟随笔尖，纵向优先，无惯性")
         }
         if ending { longPressDiagnostic("浏览滚动结束：\(planned.phase == .cancelled ? "已取消" : "抬笔")；未补发单击") }
-        lastPoint = planned.anchor
         return true
     }
     private func sendProximity(_ entering: Bool, at point: CGPoint) {

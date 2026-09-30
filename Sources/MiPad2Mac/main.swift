@@ -206,19 +206,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let menu = NSMenu(); menu.autoenablesItems = false
         let title = NSMenuItem(title: output.profileName, action: nil, keyEquivalent: "")
         title.isEnabled = false; menu.addItem(title)
-        for (index, mode) in PenNavigationMode.allCases.enumerated() {
+        for (index, mode) in PenApplicationMode.allCases.enumerated() {
             let item = NSMenuItem(title: mode.title, action: #selector(menuSelectNavigation(_:)), keyEquivalent: "")
             item.target = self; item.tag = index
             item.state = output.profileMode == mode ? .on : .off
-            item.isEnabled = output.profileID != nil && !(mode == .browse && output.profileExcluded)
+            item.isEnabled = output.profileID != nil
             menu.addItem(item)
         }
         menuNavigation.submenu = menu
         menuNavigation.title = "笔输入模式：" + output.profileMode.title
     }
     @objc func menuSelectNavigation(_ sender: NSMenuItem) {
-        guard PenNavigationMode.allCases.indices.contains(sender.tag) else { return }
-        output.changeNavigation(PenNavigationMode.allCases[sender.tag]); refreshNavigationMenu(); refreshStats()
+        guard PenApplicationMode.allCases.indices.contains(sender.tag) else { return }
+        output.changeNavigation(PenApplicationMode.allCases[sender.tag]); refreshNavigationMenu(); refreshStats()
     }
     @objc func menuSelectScreen(_ sender: NSMenuItem) {
         guard sender.tag > 0, sender.tag < screenPicker.numberOfItems else { return }

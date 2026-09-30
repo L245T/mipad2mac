@@ -17,7 +17,7 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
 
 @Test func browseTapAndLongPressRemainExclusive() {
     var gesture = LongPressGesture()
-    #expect(browse(&gesture, penAt()).pointer.isEmpty)
+    #expect(browse(&gesture, penAt()).pointer.map(\.action) == [.move])
     #expect(browse(&gesture, penAt(0.503, 0.502)).scroll.isEmpty)
     let tap = browse(&gesture, penAt(0, 1, down: false, valid: false))
     #expect(tap.pointer.map(\.action) == [.down, .up])
@@ -34,15 +34,17 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
     var gesture = LongPressGesture()
     _ = browse(&gesture, penAt())
     let begin = browse(&gesture, penAt(0.502, 0.51))
-    #expect(begin.pointer.isEmpty)
+    #expect(begin.pointer.map(\.action) == [.move])
+    #expect(begin.pointer.first?.point == CGPoint(x: -498, y: 10))
     #expect(begin.scroll == [PenScrollEvent(anchor: CGPoint(x: -500, y: 0), phase: .began, vertical: 10)])
     #expect(gesture.fire(now: 5).isEmpty)
     let change = browse(&gesture, penAt(0.8, 0.54))
-    #expect(change.pointer.isEmpty)
+    #expect(change.pointer.allSatisfy { $0.action == .move })
+    #expect(change.pointer.first?.point == CGPoint(x: -200, y: 40))
     #expect(change.scroll.first?.anchor == begin.scroll.first?.anchor)
     #expect(change.scroll.first?.horizontal == 0)
     let end = browse(&gesture, penAt(0, 1, down: false, valid: false))
-    #expect(end.pointer.isEmpty)
+    #expect(end.pointer == [PointerEvent(action: .move, point: CGPoint(x: -200, y: 40))])
     #expect(end.scroll.first?.phase == .ended)
     #expect(gesture.isIdle)
 }
@@ -53,7 +55,7 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
     #expect(!gesture.hasScheduledClick)
     let result = gesture.consumeNavigation(penAt(0.53), mapping: browseScreen, now: 1,
                        enabled: false, delay: 0.6, drawing: true, navigation: .pointer)
-    #expect(result.pointer.isEmpty)
+    #expect(result.pointer.allSatisfy { $0.action == .move })
     #expect(result.scroll.first?.horizontal == 30)
     #expect(result.scroll.first?.vertical == 0)
 }
@@ -103,7 +105,7 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
                 #expect(next.scroll.first?.anchor == origin)
                 #expect(next.scroll.first?.vertical == Int32((end.y - origin.y).rounded()))
                 #expect(next.scroll.first?.horizontal == Int32((end.x - origin.x).rounded()))
-                #expect(next.pointer.isEmpty)
+                #expect(next.pointer == [PointerEvent(action: .move, point: end)])
             }
         }
     }
@@ -132,4 +134,15 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
     let end = gesture.consume(penAt(0, 1, valid: false), mapping: browseScreen, now: 1, enabled: false, delay: 0.6, drawing: true)
     #expect(end == [PointerEvent(action: .up, point: CGPoint(x: -500, y: 0))])
     #expect(gesture.consume(penAt(), mapping: browseScreen, now: 2, enabled: false, delay: 0.6, drawing: true).isEmpty)
+}
+
+@Test func scrollCursorFollowsSubpixelAndCrossAxisMovementWithoutChangingAnchor() {
+    var gesture = LongPressGesture()
+    _ = browse(&gesture, penAt()); _ = browse(&gesture, penAt(0.5, 0.52))
+    let lateral = browse(&gesture, penAt(0.7, 0.5201))
+    #expect(lateral.scroll.isEmpty)
+    #expect(lateral.pointer == [PointerEvent(action: .move, point: browseScreen.point(x: 0.7, y: 0.5201))])
+    let lift = browse(&gesture, penAt(0, 0, down: false, valid: false))
+    #expect(lift.pointer == lateral.pointer)
+    #expect(lift.scroll.first?.anchor == CGPoint(x: -500, y: 0))
 }

@@ -7,9 +7,15 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private let suite = "MiPad2Mac-event-check-" + UUID().uuidString
     private var output: PointerOutput!
     private var defaults: UserDefaults!
-    private var window: NSWindow!
+    private var window: EventCheckWindow!
     private let view = PointerTestView(frame: NSRect(x: 0, y: 0, width: 720, height: 420))
     private let textView = EventCheckTextView(frame: NSRect(x: 40, y: 30, width: 640, height: 80))
+    private var originalFrame = NSRect.zero
+    private var originalMapping = Mapping(bounds: .zero)
+    private var scrollCountBeforeTitleDrag = 0
+    private var drawingDownBefore = 0
+    private let leftScroll = EventCheckScrollRegion(frame: NSRect(x: 30, y: 170, width: 280, height: 210))
+    private let rightScroll = EventCheckScrollRegion(frame: NSRect(x: 410, y: 170, width: 280, height: 210))
     private var originalCursor = CGPoint.zero
     private var blocked: String?
     private var failures: [String] = []
@@ -24,8 +30,9 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         output.tabletEnabled = true
         let id = Bundle.main.bundleIdentifier ?? "org.mipad2mac.app"
         output.navigation.set(.browse, for: id, name: "本地事件验收")
-        window = NSWindow(contentRect: view.bounds, styleMask: [.titled], backing: .buffered, defer: false)
+        window = EventCheckWindow(contentRect: view.bounds, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "MiPad2Mac 本地事件验收"; window.contentView = view
+        view.setAccessibilityElement(true); view.setAccessibilityRole(.scrollArea)
         textView.string = "alpha beta gamma\nsecond paragraph\n"
         textView.font = .monospacedSystemFont(ofSize: 16, weight: .regular)
         textView.isEditable = false; textView.isSelectable = true
@@ -37,10 +44,19 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         output.mapping = Mapping(bounds: CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height))
         view.record = { print($0) }
         output.longPressDiagnostic = { print($0) }
-        append {
-            self.pen(); self.pen(0.5, 0.6); self.pen(0.5, 0.7); self.pen(down: false)
+        append { self.pen() }
+        append(after: 0.04) { self.pen(0.5, 0.6) }
+        append(after: 0.04) { self.pen(0.5, 0.7) }
+        append(after: 0.08) {
+            let expected = self.output.mapping.point(x: 0.5, y: 0.7)
+            let cursor = CGEvent(source: nil)?.location ?? .zero
+            self.check(hypot(cursor.x - expected.x, cursor.y - expected.y) < 2, "滚动过程中系统光标跟随笔尖")
+            self.pen(0, 0, down: false)
         }
         append {
+            let expected = self.output.mapping.point(x: 0.5, y: 0.7)
+            let cursor = CGEvent(source: nil)?.location ?? .zero
+            self.check(hypot(cursor.x - expected.x, cursor.y - expected.y) < 2, "滚动抬笔不跳回落笔锚点")
             self.check(self.view.bridgeDown == 0 && self.view.bridgeUp == 0, "滚动没有左键点击")
             self.check(self.view.receivedScrollPhases.contains(1) && self.view.receivedScrollPhases.contains(4), "滚动开始与结束实际到达")
             self.check(self.view.receivedTabletContacts == 0, "浏览没有数位笔接触")
@@ -99,9 +115,56 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: cadence) { self.textPen(character: 10, down: false) }
         append(after: cadence) {
             self.check(self.textView.selectedRange().length > 1, "指针模式保留文字拖选")
+            self.output.release()
+            self.output.applicationProfiles.set(.drawing, for: id, name: "本地事件验收")
+            self.output.longPress.enabled = true; self.output.tabletEnabled = true
+            self.drawingDownBefore = self.view.bridgeDown
+            self.pen()
+        }
+        append(after: 0.8) { self.pen(0.55, 0.5); self.pen(down: false) }
+        append {
+            self.check(self.view.bridgeDown == self.drawingDownBefore + 1, "绘画模式在全局长按开启时仍即时落笔")
+            self.check(self.view.receivedRightClicks == 1, "绘画模式停笔不触发右键")
+            self.output.release()
+            self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
+            self.output.longPress.enabled = true
+            self.output.tabletEnabled = true
+            self.originalMapping = self.output.mapping
+            let screen = NSScreen.screens.first!.frame
+            self.output.mapping = Mapping(bounds: CGRect(x: screen.minX, y: 0, width: screen.width, height: screen.height))
+            self.originalFrame = self.window.frame
+            self.scrollCountBeforeTitleDrag = self.output.scrollEventCount
+            self.titlePen()
+        }
+        append { self.titlePen(offset: 10) }
+        append { self.titlePen(offset: 50) }
+        append { self.titlePen(offset: 50, down: false) }
+        append {
+            self.check(abs(self.window.frame.minX - self.originalFrame.minX) > 20, "浏览模式实际拖动窗口顶栏")
+            self.check(self.output.scrollEventCount == self.scrollCountBeforeTitleDrag, "顶栏拖动没有滚动事件")
+            self.window.setFrame(self.originalFrame, display: true)
+            self.output.mapping = self.originalMapping
+            self.output.release(); self.output.longPress.enabled = false
+            self.view.addSubview(self.leftScroll); self.view.addSubview(self.rightScroll)
+            self.pen(0.15, 0.3)
+        }
+        append { self.pen(0.15, 0.4) }
+        append { self.pen(0.8, 0.45) }
+        append { self.pen(0, 0, down: false) }
+        append {
+            self.check(self.leftScroll.scrolls > 0 && self.rightScroll.scrolls == 0, "光标跨越相邻内容区仍只滚动原落笔区域")
+            let expected = self.output.mapping.point(x: 0.8, y: 0.45)
+            let cursor = CGEvent(source: nil)?.location ?? .zero
+            self.check(hypot(cursor.x - expected.x, cursor.y - expected.y) < 2, "跨区滚动光标跟随且抬笔不跳变")
             self.finish()
         }
         runNext()
+    }
+    private func titlePen(offset: CGFloat = 0, down: Bool = true) {
+        let desktop = NSPoint(x: originalFrame.midX + offset, y: originalFrame.maxY - 10)
+        let bounds = output.mapping.bounds
+        let top = NSScreen.screens.first!.frame.maxY
+        pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY) / (bounds.height - 1), down: down)
     }
     private func textPen(character: Int, down: Bool = true) {
         guard let layout = textView.layoutManager, let container = textView.textContainer else { return }
@@ -149,7 +212,8 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             "textTrace": textView.trace, "textSelectionLocation": textView.selectedRange().location, "textSelectionLength": textView.selectedRange().length,
             "AXTrusted": AXIsProcessTrusted(), "postAccess": CGPreflightPostEventAccess(),
             "postedDown": output.downCount, "postedUp": output.upCount, "postedScroll": output.scrollEventCount,
-            "warpError": output.lastWarpError.rawValue,
+            "warpError": output.lastWarpError.rawValue, "windowTrace": window.trace,
+            "originalWindowFrame": NSStringFromRect(originalFrame), "windowMovable": window.isMovable,
             "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             print(String(decoding: data, as: UTF8.self))
@@ -175,5 +239,28 @@ private final class EventCheckTextView: NSTextView {
     override func mouseUp(with event: NSEvent) {
         trace.append("up point=\(event.locationInWindow) range=\(selectedRange())")
         super.mouseUp(with: event)
+    }
+}
+
+private final class EventCheckScrollRegion: NSView {
+    var scrolls = 0
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(true); setAccessibilityRole(.scrollArea)
+    }
+    required init?(coder: NSCoder) { fatalError("Local diagnostic only") }
+    override func scrollWheel(with event: NSEvent) {
+        if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag { scrolls += 1 }
+    }
+}
+
+private final class EventCheckWindow: NSWindow {
+    var trace: [String] = []
+    override func sendEvent(_ event: NSEvent) {
+        if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag &&
+            [.leftMouseDown, .leftMouseDragged, .leftMouseUp].contains(event.type) {
+            trace.append("type=\(event.type.rawValue) point=\(event.locationInWindow) frame=\(frame) buttons=\(NSEvent.pressedMouseButtons)")
+        }
+        super.sendEvent(event)
     }
 }

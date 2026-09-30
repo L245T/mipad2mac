@@ -113,12 +113,12 @@ public struct LongPressGesture {
             origin = mapping.point(x: sample.x, y: sample.y); last = origin
             phase = .pending
             deadline = enabled ? now + LongPressPreferences.validDelay(delay) : nil
-            return PenGestureEvents()
+            return PenGestureEvents(pointer: navigation == .browse ? [PointerEvent(action: .move, point: origin)] : [])
         }
         if !contact {
             if phase == .scrolling {
                 phase = .idle; deadline = nil
-                return PenGestureEvents(scroll: [PenScrollEvent(anchor: origin, phase: .ended)])
+                return PenGestureEvents(pointer: [PointerEvent(action: .move, point: last)], scroll: [PenScrollEvent(anchor: origin, phase: .ended)])
             }
             let wasPending = phase == .pending
             phase = .idle; deadline = nil
@@ -131,7 +131,7 @@ public struct LongPressGesture {
         }
         if phase == .pending && navigationMode == .browse {
             let dx = point.x - origin.x, dy = point.y - origin.y
-            guard hypot(dx, dy) >= PenScrollEvent.activationDistance else { return PenGestureEvents() }
+            guard hypot(dx, dy) >= PenScrollEvent.activationDistance else { return PenGestureEvents(pointer: [PointerEvent(action: .move, point: point)]) }
             scrollAxis = abs(dx) > abs(dy) * 1.5 ? .horizontal : .vertical
             phase = .scrolling; deadline = nil; scrollRemainder = 0
             return scroll(to: point, phase: .began)
@@ -151,8 +151,9 @@ public struct LongPressGesture {
         last = point
         let pixels = scrollRemainder.rounded(.towardZero)
         scrollRemainder -= pixels
-        guard pixels != 0 || phase == .began else { return PenGestureEvents() }
-        return PenGestureEvents(scroll: [PenScrollEvent(anchor: origin, phase: phase,
+        let pointer = [PointerEvent(action: .move, point: point)]
+        guard pixels != 0 || phase == .began else { return PenGestureEvents(pointer: pointer) }
+        return PenGestureEvents(pointer: pointer, scroll: [PenScrollEvent(anchor: origin, phase: phase,
                 horizontal: scrollAxis == .horizontal ? Int32(pixels) : 0,
                 vertical: scrollAxis == .vertical ? Int32(pixels) : 0)])
     }

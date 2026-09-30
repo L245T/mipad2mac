@@ -164,16 +164,13 @@ struct SettingsDetail: View {
                         Text(app.output.profileApplications[id] ?? id).tag(id)
                     }
                 }
-                SettingsPicker("默认模式", selection: Binding(get: { app.output.profileMode }, set: { value in model.act { app.output.changeNavigation(value) } })) {
-                    Text("指针").tag(PenNavigationMode.pointer)
-                    Text("浏览").tag(PenNavigationMode.browse)
-                }.disabled(app.output.profileID == nil || app.output.profileExcluded)
-                if app.output.profileExcluded {
-                    settingDescription("此应用在绘画排除名单中，保持指针模式。")
-                }
-                HStack { Spacer(); Button("选择其他应用…") { model.act { app.output.chooseNavigationApplication() } } }
-            } header: { Text("笔输入模式") } footer: {
-                footerNote("为所选应用保存。指针用于拖动、选字和绘画；浏览用于滑动滚动，轻点仍单击，静止长按仍右键。浏览器内绘画或选字前，请从HID菜单切回指针。")
+                SettingsPicker("输入模式", selection: Binding(get: { app.output.profileMode }, set: { value in model.act { app.output.changeNavigation(value) } })) {
+                    ForEach(PenApplicationMode.allCases, id: \.rawValue) { Text($0.title).tag($0) }
+                }.disabled(app.output.profileID == nil)
+                settingDescription(app.output.profileMode.explanation)
+                HStack { Spacer(); Button("添加或选择应用…") { model.act { app.output.chooseNavigationApplication() } } }
+            } header: { Text("应用笔设置") } footer: {
+                footerNote("设置按应用自动保存，也可从HID菜单切换。原“不使用长按右键”的应用已按绘画模式保留，在此统一调整。")
             }
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
@@ -205,7 +202,7 @@ struct SettingsDetail: View {
                         Text("长按防抖")
                         Spacer()
                         Text(jitterValueLabel).monospacedDigit().foregroundStyle(.secondary)
-                        ExplanationButton(text: "过滤长按时的笔尖抖动，可选择0–18的任一整数，单位为逻辑点，不改变长按等待时间。\n\n默认中（4），保留原有手感。无（0）不容忍实际位移，但完全静止仍可触发长按右键。\n\n设置自动保存；绘画排除名单中的应用不受影响。", label: "长按防抖说明")
+                        ExplanationButton(text: "过滤长按时的笔尖抖动，可选择0–18的任一整数，单位为逻辑点，不改变长按等待时间。\n\n默认中（4），保留原有手感。无（0）不容忍实际位移，但完全静止仍可触发长按右键。\n\n设置自动保存；绘画模式不受影响。", label: "长按防抖说明")
                     }
                     SettingsIntegerSlider(value: Binding(get: { app.output.longPress.jitterFilter.tolerance }, set: { value in
                         model.act { app.output.changeLongPress { $0.jitterFilter = LongPressJitterFilter(tolerance: value) } }
@@ -217,18 +214,6 @@ struct SettingsDetail: View {
                     ExplanationButton(text: "已知笔接口中未检测到捏、双击或滑动笔杆的可用控制数据，暂无法映射为按键。", label: "虚拟按键暂不支持的原因")
                 }
             } header: { Text("笔输入") } footer: { EmptyView() }
-            SettingsSection {
-                ForEach(app.output.longPress.exclusions.keys.sorted(), id: \.self) { id in
-                    LabeledContent(app.output.longPress.exclusions[id] ?? id) {
-                        Button("移除") { model.act { app.output.changeLongPress { settings in
-                            var apps = settings.exclusions; apps.removeValue(forKey: id); settings.exclusions = apps
-                        } } }.accessibilityLabel("从长按排除名单移除 \(app.output.longPress.exclusions[id] ?? id)")
-                    }
-                }
-                HStack { Spacer(); Button("添加应用…") { model.act { app.output.addExcludedApplication() } } }
-            } header: { Text("不使用长按右键的应用") } footer: {
-                footerNote("这些应用保持即时落笔，包含工具栏在内均不触发长按。绘画前请将所用应用加入名单。普通应用轻点在抬笔时单击；移动超过轻微抖动范围后开始拖动。")
-            }
             SettingsSection("手指输入") {
                 LabeledContent("状态") {
                     Text("暂不支持").foregroundStyle(.secondary)
@@ -284,7 +269,7 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 DisclosureGroup {
-                    settingDescription("先开启 MiPad2Mac 控制和长按右键。进入拖动后，本次接触不再触发右键。绘画排除名单中的应用（包括工具栏）不触发长按，以保护绘画。")
+                    settingDescription("先开启 MiPad2Mac 控制和长按右键。进入拖动后，本次接触不再触发右键。应用笔设置为绘画模式时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
                 } label: {
                     Text("1. 确认长按条件").font(.headline)
                 }.disclosureGroupStyle(HelpDisclosureStyle(summary: "笔尖停住，等到设定时间；先在桌面试一次。"))
@@ -330,8 +315,8 @@ struct SettingsDetail: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(app.output.longPress.compatibilityApplications[id] ?? id)
                                 .fixedSize(horizontal: false, vertical: true)
-                            if app.output.longPress.excludes(id) {
-                                settingDescription("已在绘画排除名单中，不触发长按")
+                            if app.output.applicationProfiles.mode(for: id) == .drawing {
+                                settingDescription("此应用使用绘画模式，不触发长按")
                             }
                         }
                         Spacer(minLength: 8)
@@ -343,10 +328,10 @@ struct SettingsDetail: View {
                 }
                 HStack {
                     Spacer()
-                    Button("添加应用…") { model.act { app.output.addExcludedApplication(compatibility: true) } }
+                    Button("添加应用…") { model.act { app.output.addCompatibilityApplication() } }
                 }
             } header: { Text("所选应用") } footer: {
-                footerNote("关闭兼容选项会保留所选应用；绘画排除名单始终优先。软件不会自动检测或修改浏览器扩展。")
+                footerNote("关闭兼容选项会保留所选应用；绘画模式不使用长按及兼容右键。软件不会自动检测或修改浏览器扩展。")
             }
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
