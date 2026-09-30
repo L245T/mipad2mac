@@ -9,6 +9,43 @@ final class HIDReader {
     var sample: (Sample) -> Void = { _ in }
     var disconnected: () -> Void = {}
     var devicesChanged: () -> Void = {}
+    var candidatesChanged: () -> Void = {}
+    let customPens = CustomPenPreferences()
+    private(set) var candidates: [Candidate] = []
+    private var manualID: UUID?
+    var manualProfile: CustomPenDevice? { candidates.first { $0.id == manualID }?.profile }
+    var canSaveManualDevice: Bool {
+        readyForControl && manualProfile.map { !customPens.recognizes($0) } == true
+    }
+    var manualCandidates: [Candidate] { candidates.filter { $0.profile != nil } }
+    var needsManualSelection: Bool {
+        !readyForControl && !candidates.contains(where: { $0.automatic }) && !manualCandidates.isEmpty
+    }
+    final class Candidate: Identifiable {
+        let id = UUID()
+        let device: IOHIDDevice
+        let name: String
+        let vendorID: Int
+        let productID: Int
+        let profile: CustomPenDevice?
+        let builtIn: Bool
+        var automatic: Bool
+        init(device: IOHIDDevice, reader: HIDReader) {
+            self.device = device
+            func number(_ key: String) -> Int { (IOHIDDeviceGetProperty(device, key as CFString) as? NSNumber)?.intValue ?? -1 }
+            vendorID = number(kIOHIDVendorIDKey); productID = number(kIOHIDProductIDKey)
+            let page = number(kIOHIDPrimaryUsagePageKey), usage = number(kIOHIDPrimaryUsageKey)
+            let manufacturer = IOHIDDeviceGetProperty(device, kIOHIDManufacturerKey as CFString) as? String
+            let product = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String
+            let descriptor = IOHIDDeviceGetProperty(device, kIOHIDReportDescriptorKey as CFString) as? Data ?? Data()
+            name = product ?? "未命名笔设备"
+            profile = CustomPenDevice(vendorID: vendorID, productID: productID, usagePage: page, usage: usage,
+                                      manufacturer: manufacturer, product: product, descriptor: descriptor)
+            builtIn = PenDeviceIdentity.permits(vendorID: vendorID, productID: productID, usagePage: page, usage: usage,
+                                               manufacturer: manufacturer, product: product, descriptor: descriptor)
+            automatic = builtIn || (profile.map { reader.customPens.recognizes($0) } ?? false)
+        }
+    }
     var diagnosticsEnabled = false
     var measurement: InputRateMeasurement?
     var penCapture: PenCapture?
@@ -44,19 +81,20 @@ final class HIDReader {
     func start() {
         guard !running else { return }
         manager = IOHIDManagerCreate(kCFAllocatorDefault, IOHIDManagerOptions.independentDevices.rawValue)
-        // Match only Xiaomi's digitizer. Never open its keyboard collection or the Mac keyboard.
-        let match: [String: Any] = [kIOHIDVendorIDKey: 0x2717, kIOHIDProductIDKey: 0x2d05,
-                                  kIOHIDPrimaryUsagePageKey: 0x0d, kIOHIDPrimaryUsageKey: 0x02]
+        // Discovery reads pen metadata only. Unknown candidates are not opened or monitored.
+        // Independent-devices mode keeps IOHIDManager from opening candidates on our behalf.
+        let match: [String: Any] = [kIOHIDPrimaryUsagePageKey: PenDeviceIdentity.usagePage,
+                                   kIOHIDPrimaryUsageKey: PenDeviceIdentity.usage]
         IOHIDManagerSetDeviceMatching(manager, match as CFDictionary)
         let context = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, { context, _, _, device in
             guard let context else { return }
-            Unmanaged<HIDReader>.fromOpaque(context).takeUnretainedValue().attach(device)
+            Unmanaged<HIDReader>.fromOpaque(context).takeUnretainedValue().observe(device)
         }, context)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, { context, _, _, device in
             guard let context else { return }
             let reader = Unmanaged<HIDReader>.fromOpaque(context).takeUnretainedValue()
-            reader.detach(device)
+            reader.removeCandidate(device)
         }, context)
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, 0)
@@ -64,9 +102,57 @@ final class HIDReader {
         status("HID manager: \(result == 0 ? "已打开" : String(format: "0x%08x", result))")
     }
 
-    private func attach(_ device: IOHIDDevice) {
-        guard !devices.contains(where: { CFEqual($0.device, device) }) else { return }
+    private func observe(_ device: IOHIDDevice) {
+        guard !candidates.contains(where: { CFEqual($0.device, device) }) else { return }
+        let candidate = Candidate(device: device, reader: self)
+        candidates.append(candidate)
+        if manualID == nil && candidate.automatic { attach(candidate) }
+        candidatesChanged()
+    }
+    private func removeCandidate(_ device: IOHIDDevice) {
+        if let candidate = candidates.first(where: { CFEqual($0.device, device) }), candidate.id == manualID {
+            manualID = nil
+        }
+        detach(device)
+        candidates.removeAll { CFEqual($0.device, device) }
+        candidatesChanged()
+    }
+    @discardableResult func selectCandidate(_ id: UUID) -> Bool {
+        guard let candidate = manualCandidates.first(where: { $0.id == id }) else { return false }
+        // The caller releases output before switching. Close the previous pen, never another HID class.
+        for device in Array(devices) { detach(device.device) }
+        manualID = id
+        attach(candidate)
+        candidatesChanged()
+        return readyForControl
+    }
+    func saveManualDevice() {
+        guard canSaveManualDevice, let profile = manualProfile else { return }
+        customPens.save(profile)
+        candidates.first { $0.id == manualID }?.automatic = true
+        candidatesChanged()
+    }
+    func removeSavedDevice(_ id: UUID) {
+        customPens.remove(id)
+        for candidate in candidates {
+            candidate.automatic = candidate.builtIn || (candidate.profile.map { customPens.recognizes($0) } ?? false)
+        }
+        // Keep an already selected device for this connection; deletion only removes future trust.
+        candidatesChanged()
+    }
+    private func attach(_ candidate: Candidate) {
+        let device = candidate.device
+        guard !devices.contains(where: { CFEqual($0.device, device) }),
+              candidate.automatic || candidate.id == manualID else { return }
         let descriptor = IOHIDDeviceGetProperty(device, kIOHIDReportDescriptorKey as CFString) as? Data ?? Data()
+        // Revalidate the layout just before opening a manual/custom candidate.
+        let current = Candidate(device: device, reader: self)
+        if candidate.builtIn {
+            guard current.builtIn else { return }
+        } else {
+            guard let original = candidate.profile, let verified = current.profile,
+                  original.matches(verified) else { return }
+        }
         let supported = XiaomiDigitizer.supports(descriptor)
         let result = IOHIDDeviceOpen(device, 0)
         guard result == kIOReturnSuccess else {
@@ -77,7 +163,8 @@ final class HIDReader {
         devices.append(deviceContext)
         registerReports(deviceContext)
         IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        status(supported ? "已连接 Xiaomi 数位笔接口；描述符匹配" : "未知描述符：仅诊断，禁止输出鼠标事件")
+        status(supported ? candidate.name + String(format: "（%04x:%04x）；笔描述符匹配", candidate.vendorID, candidate.productID)
+                         : "未知描述符：仅诊断，禁止输出鼠标事件")
         devicesChanged()
     }
 
@@ -86,7 +173,10 @@ final class HIDReader {
         IOHIDDeviceRegisterInputReportCallback(device, deviceContext.buffer, 4096, {
             context, result, _, _, reportID, bytes, length in
             guard let context else { return }
-            let d = Unmanaged<DeviceContext>.fromOpaque(context).takeUnretainedValue()
+            let reader = Unmanaged<HIDReader>.fromOpaque(context).takeUnretainedValue()
+            // A queued callback may outlive a closed/reselected DeviceContext. Resolve only a
+            // currently owned buffer; never dereference a released context from an old callback.
+            guard let d = reader.devices.first(where: { $0.buffer == bytes }) else { return }
             guard result == kIOReturnSuccess, length > 0, length <= 4096 else {
                 d.reader.disconnected(); return
             }
@@ -105,7 +195,7 @@ final class HIDReader {
             d.reader.decoded += 1
             if !sample.positionValid { d.reader.resetReports += 1 }
             d.reader.sample(sample)
-        }, Unmanaged.passUnretained(deviceContext).toOpaque())
+        }, Unmanaged.passUnretained(self).toOpaque())
     }
 
     /// Exclusive access applies only to the known pen interface while control is enabled.
@@ -114,6 +204,7 @@ final class HIDReader {
         guard devices.count == 1, let d = devices.first, d.supported else { return !desired }
         if d.exclusive == desired { return true }
         IOHIDDeviceUnscheduleFromRunLoop(d.device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDDeviceRegisterInputReportCallback(d.device, d.buffer, 4096, nil, nil)
         IOHIDDeviceClose(d.device, 0)
         let result = IOHIDDeviceOpen(d.device, desired ? IOOptionBits(kIOHIDOptionsTypeSeizeDevice) : 0)
         d.exclusive = desired && result == kIOReturnSuccess
@@ -130,6 +221,7 @@ final class HIDReader {
         guard let index = devices.firstIndex(where: { CFEqual($0.device, device) }) else { return }
         let d = devices[index]
         IOHIDDeviceUnscheduleFromRunLoop(d.device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDDeviceRegisterInputReportCallback(d.device, d.buffer, 4096, nil, nil)
         IOHIDDeviceClose(d.device, 0)
         devices.remove(at: index)
         disconnected()
@@ -140,6 +232,7 @@ final class HIDReader {
     func stop() {
         guard running else { return }
         for d in Array(devices) { detach(d.device) }
+        candidates.removeAll(); manualID = nil
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         IOHIDManagerClose(manager, 0)
         running = false

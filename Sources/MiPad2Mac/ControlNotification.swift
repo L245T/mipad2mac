@@ -14,7 +14,7 @@ final class ControlNotification: NSObject, UNUserNotificationCenterDelegate {
                 guard let self, allowed, self.generation == token, isStillActive() else { return }
                 let content = UNMutableNotificationContent()
                 content.title = "平板触控笔已由 MiPad2Mac 控制"
-                content.body = "已自动选择平板屏幕。现在可用触控笔定位、点击和拖动。"
+                content.body = "使用当前选择的目标屏幕。现在可用触控笔定位、点击和拖动。"
                 self.center.add(UNNotificationRequest(identifier: "tablet-control", content: content, trigger: nil))
             }
         }

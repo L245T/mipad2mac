@@ -13,6 +13,9 @@ final class SettingsPresentation: ObservableObject {
     func sync() {
         let fields = [app.statusLabel.stringValue, app.controlSummary.stringValue,
             app.permissionsLabel.stringValue, app.updateLabel.stringValue,
+            app.reader.candidates.map { $0.id.uuidString }.joined(),
+            app.reader.customPens.devices.map { $0.id.uuidString }.joined(),
+            String(app.reader.canSaveManualDevice), app.reader.manualProfile?.id.uuidString ?? "",
             app.settingsPage.loginStatus.stringValue, app.settingsPage.loginError.stringValue,
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
@@ -130,12 +133,22 @@ struct SettingsDetail: View {
                 if !app.enabled && app.automaticControl.requested {
                     Text(app.statusLabel.stringValue).font(.callout).foregroundStyle(.secondary)
                 }
-                HStack { Spacer(); Button("权限检查…") { app.showPermissions() }; Button("重新连接") { model.act { app.reconnect() } } }
+                HStack { Button("选择笔设备…") { app.choosePenDevice() }; Spacer(); Button("权限检查…") { app.showPermissions() }; Button("重新连接") { model.act { app.reconnect() } } }
+                if let profile = app.reader.manualProfile {
+                    LabeledContent("本次手动选择") { Text(profile.product).foregroundStyle(.secondary) }
+                    if app.reader.canSaveManualDevice {
+                        HStack {
+                            Text("本次选择尚未保存").font(.callout).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("保存为自定义笔设备…") { app.saveCustomPenDevice() }
+                        }
+                    }
+                }
             } footer: {
                 Text("当前仅支持触控笔输入。")
             }
             SettingsSection {
-                SettingsPicker("目标显示器", selection: Binding(get: { app.screenPicker.indexOfSelectedItem }, set: { value in model.act { app.screenPicker.selectItem(at: value); app.mappingChanged() } })) {
+                SettingsPicker("目标显示器", selection: Binding(get: { app.screenPicker.indexOfSelectedItem }, set: { value in model.act { app.selectTargetDisplay(value) } })) {
                     ForEach(Array(app.screenPicker.itemTitles.enumerated()), id: \.offset) { Text($0.element).tag($0.offset) }
                 }
                 SettingsPicker("旋转方向", selection: Binding(get: { app.rotationPicker.indexOfSelectedItem }, set: { value in model.act { app.rotationPicker.selectItem(at: value); app.mappingChanged() } })) {
@@ -143,7 +156,7 @@ struct SettingsDetail: View {
                 }
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
-            } header: { Text("显示器") } footer: { footerNote("“跟随系统”自动适配目标显示器的旋转，也可手动指定角度；选择自动保存。修改映射会结束当前笔画，处理方式保持不变。显示的是逻辑分辨率。") }
+            } header: { Text("显示器") } footer: { footerNote("“跟随系统”自动适配目标显示器的旋转，也可手动指定角度；旋转方向自动保存。修改映射会结束当前笔画，处理方式保持不变。目标显示器仅用于本次运行，不会自动保存；手动选屏后不会被自动识别覆盖。显示的是逻辑分辨率。") }
             SettingsSection {
                 SettingsPicker("应用", selection: Binding(get: { app.output.profileID ?? "" }, set: { value in model.act { app.output.selectProfile(value) } })) {
                     if app.output.profileID == nil { Text("请先选择应用").tag("") }
@@ -390,6 +403,18 @@ struct SettingsDetail: View {
     }
     private var settings: some View {
         Group {
+            SettingsSection {
+                if app.reader.customPens.devices.isEmpty {
+                    Text("尚未保存自定义笔设备").foregroundStyle(.secondary)
+                }
+                ForEach(app.reader.customPens.devices) { device in
+                    LabeledContent(device.product) {
+                        Button("删除…") { app.removeCustomPenDevice(device) }
+                    }
+                }
+            } header: { Text("自定义笔设备") } footer: {
+                footerNote("手动选择仅用于本次连接。确认使用正常后，在控制页单独保存；下次连接会核对设备身份和完整报文格式。")
+            }
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.settingsPage.materialToggle.state == .on }, set: { value in model.act { app.settingsPage.materialToggle.state = value ? .on : .off; app.settingsPage.materialChanged() } })) {
                     Text("透明侧栏"); settingDescription("采用系统侧栏材质，遵循降低透明度设置。")

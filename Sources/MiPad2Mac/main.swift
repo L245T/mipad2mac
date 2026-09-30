@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let controlNotification = ControlNotification()
     var automaticNotificationPending = false
     var tabletDisplayIDs: [UInt32] = []
+    var targetDisplaySelection = TargetDisplaySelection()
     let startupCoordinator = StartupCoordinator()
     let updateChecker = UpdateChecker()
     let nativeUpdater = NativeUpdater()
@@ -72,6 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var postAllowed = false
     var inputAllowed = false
     var readerStartupDeferred = false
+    var promptedPenCandidates = Set<UUID>()
+    var penSelectionPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let startupSource = SystemStartupSource.detect(NSAppleEventManager.shared().currentAppleEvent)
@@ -88,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         reader.status = { [weak self] text in self?.statusLabel.stringValue = text; self?.testRecord.append(text) }
         reader.disconnected = { [weak self] in self?.finishPenCapture(reason: "设备断开"); self?.connection.disconnected(); self?.automaticNotificationPending = false; self?.disable(); self?.output.resetConnection() }
         reader.devicesChanged = { [weak self] in self?.connectionChanged() }
+        reader.candidatesChanged = { [weak self] in self?.penCandidatesChanged() }
         reader.sample = { [weak self] sample in
             guard let self else { return }
             self.latestSample = sample
@@ -129,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         window.center(); window.isReleasedWhenClosed = false
         for label in [statusLabel, countsLabel, packetLabel, sampleLabel, permissionsLabel, controlLabel, rateTestLabel] { label.isSelectable = true }
         packetLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        screenPicker.target = self; screenPicker.action = #selector(mappingChanged)
+        screenPicker.target = self; screenPicker.action = #selector(targetDisplayChanged)
         screenPicker.setAccessibilityLabel("目标显示器")
         rotationPicker.addItems(withTitles: DisplayRotationMode.allCases.map(\.title))
         rotationPicker.selectItem(at: DisplayRotationMode.allCases.firstIndex(of: rotationPreferences.mode) ?? 0)
@@ -218,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc func menuSelectScreen(_ sender: NSMenuItem) {
         guard sender.tag > 0, sender.tag < screenPicker.numberOfItems else { return }
-        screenPicker.selectItem(at: sender.tag); mappingChanged()
+        selectTargetDisplay(sender.tag)
     }
     @objc func menuToggle() {
         startupCoordinator.userDidOpenWindow()
@@ -254,8 +258,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let bounds = CGDisplayBounds(id)
             screenPicker.addItem(withTitle: "\(screen.localizedName) · 逻辑 \(Int(bounds.width))×\(Int(bounds.height)) · ID \(id)\(CGDisplayIsBuiltin(id) != 0 ? "（内置）" : "")")
         }
-        if let previous, let index = displays.firstIndex(of: previous) { screenPicker.selectItem(at: index + 1) }
-        else if reader.readyForControl && candidates.count == 1 { screenPicker.selectItem(at: candidates[0]) }
+        targetDisplaySelection.refresh(available: displays)
+        let retained = targetDisplaySelection.isManual ? targetDisplaySelection.displayID : previous
+        if let previous = retained, let index = displays.firstIndex(of: previous) { screenPicker.selectItem(at: index + 1) }
+        else if !targetDisplaySelection.isManual && reader.readyForControl && candidates.count == 1 { screenPicker.selectItem(at: candidates[0]) }
     }
     @objc func monitoringChanged() {
         monitoring = monitoringToggle.state == .on
@@ -489,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         statusLabel.stringValue = "笔接口由 MiPad2Mac 使用；切换为原生处理后交还 macOS。"
         if automaticNotificationPending {
             automaticNotificationPending = false
-            statusLabel.stringValue = "平板触控笔已由 MiPad2Mac 控制，已自动选择平板屏幕。"
+            statusLabel.stringValue = "平板触控笔已由 MiPad2Mac 控制，使用当前选择的目标屏幕。"
             controlNotification.show { [weak self] in self?.enabled == true }
         }
     }
@@ -502,6 +508,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         statusItem?.button?.title = "HID"
     }
     @objc func pause() { automaticNotificationPending = false; automaticControl.pause(); disable(); statusLabel.stringValue = "鼠标控制已暂停" }
+    @objc func targetDisplayChanged() { selectTargetDisplay(screenPicker.indexOfSelectedItem) }
+    func selectTargetDisplay(_ item: Int) {
+        guard item >= 0 && item < screenPicker.numberOfItems else { return }
+        screenPicker.selectItem(at: item)
+        let index = item - 1
+        targetDisplaySelection.choose(displays.indices.contains(index) ? displays[index] : nil)
+        mappingChanged()
+    }
     @objc func mappingChanged() {
         let selection = rotationPicker.indexOfSelectedItem
         if DisplayRotationMode.allCases.indices.contains(selection) {
@@ -527,12 +541,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let target = connection.observe(penReady: reader.readyForControl, displayIDs: tabletDisplayIDs),
            let index = displays.firstIndex(of: target) {
             disable()
-            screenPicker.selectItem(at: index + 1)
+            if !targetDisplaySelection.isManual { screenPicker.selectItem(at: index + 1) }
             automaticControl.request()
             automaticNotificationPending = true
         }
         attemptAutoStart()
         tabs?.model.sync()
+    }
+    func penCandidatesChanged() {
+        promptedPenCandidates.formIntersection(Set(reader.candidates.map(\.id)))
+        tabs?.model.sync()
+        guard !penSelectionPending else { return }
+        penSelectionPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self else { return }
+            self.penSelectionPending = false
+            self.offerManualPenSelection()
+        }
+    }
+    func offerManualPenSelection() {
+        guard reader.running, automaticControl.requested, permissionsReady,
+              window.isVisible, window.attachedSheet == nil, reader.needsManualSelection else { return }
+        let ids = Set(reader.manualCandidates.map(\.id))
+        guard !ids.isSubset(of: promptedPenCandidates) else { return }
+        promptedPenCandidates.formUnion(ids)
+        choosePenDevice()
+    }
+    @objc func choosePenDevice() {
+        guard window.attachedSheet == nil else { return }
+        let candidates = reader.manualCandidates
+        let alert = NSAlert()
+        if candidates.isEmpty {
+            alert.messageText = "未找到可用的笔设备"
+            alert.informativeText = "请连接平板并进入DP-in，再点击重新连接。仅显示笔用途和完整报文格式匹配的设备。"
+            alert.addButton(withTitle: "好")
+            alert.beginSheetModal(for: window)
+            return
+        }
+        alert.messageText = "选择笔设备"
+        alert.informativeText = "请选择平板对应的笔设备。本次选择不会保存；确认定位、点击和绘画正常后，可在控制页单独保存。"
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 360, height: 28))
+        for candidate in candidates {
+            picker.addItem(withTitle: candidate.name + String(format: "（%04x:%04x）", candidate.vendorID, candidate.productID))
+        }
+        picker.setAccessibilityLabel("笔设备")
+        alert.accessoryView = picker
+        alert.addButton(withTitle: "使用此设备"); alert.addButton(withTitle: "取消")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn,
+                  candidates.indices.contains(picker.indexOfSelectedItem) else { return }
+            let id = candidates[picker.indexOfSelectedItem].id
+            guard self.reader.manualCandidates.contains(where: { $0.id == id }) else { return }
+            self.finishPenCapture(reason: "切换笔设备")
+            self.disable()
+            if self.reader.selectCandidate(id) {
+                self.automaticControl.request(); self.connectionChanged()
+            }
+            self.refreshStats()
+        }
+    }
+    @objc func saveCustomPenDevice() {
+        guard reader.canSaveManualDevice, let profile = reader.manualProfile,
+              window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "保存为自定义笔设备？"
+        alert.informativeText = "请先确认“\(profile.product)”的定位、点击和绘画正常。保存后，下次连接相同身份和报文格式的设备会自动尝试接管；可在设置中删除。"
+        alert.addButton(withTitle: "保存"); alert.addButton(withTitle: "取消")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn,
+                  self.reader.manualProfile?.id == profile.id else { return }
+            self.reader.saveManualDevice(); self.tabs.model.sync()
+        }
+    }
+    func removeCustomPenDevice(_ profile: CustomPenDevice) {
+        guard window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "删除自定义笔设备？"
+        alert.informativeText = "删除“\(profile.product)”的保存记录。本次连接仍可使用；下次连接将重新按内置规则识别或由你手动选择。"
+        alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            self.reader.removeSavedDevice(profile.id); self.tabs.model.sync()
+        }
     }
     @objc func displayChanged() { connectionChanged(); mappingChanged() }
     @objc func reconnect() {
@@ -547,6 +637,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         refreshPermissions()
         if !permissionsReady || !startupCoordinator.notices.isEmpty { tabs.selectTabViewItem(at: 1) }
         showSelectedPage()
+        offerManualPenSelection()
     }
     private func showSelectedPage() {
         startupCoordinator.userDidOpenWindow()
