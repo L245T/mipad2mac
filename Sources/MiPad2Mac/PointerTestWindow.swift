@@ -12,6 +12,7 @@ final class PointerTestView: NSView {
     var receivedClickCounts: [Int] = []
     var receivedScrollPhases: [Int64] = []
     var receivedRightClicks = 0
+    var receivedDragClickCounts: [Int] = []
     var receivedDrags = 0
     var receivedTabletContacts = 0
     private var lastScrollLog = -Double.infinity
@@ -53,7 +54,10 @@ final class PointerTestView: NSView {
     }
     override func mouseDragged(with event: NSEvent) {
         inspectTablet(event)
-        if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag { receivedDrags += 1 }
+        if event.cgEvent?.getIntegerValueField(.eventSourceUserData) == bridgeEventTag {
+            receivedDrags += 1
+            if receivedDragClickCounts.count < 200 { receivedDragClickCounts.append(event.clickCount) }
+        }
         cursor = convert(event.locationInWindow, from: nil)
         if let downPoint, hypot(cursor.x - downPoint.x, cursor.y - downPoint.y) >= 4 { dragged = true }
         needsDisplay = true

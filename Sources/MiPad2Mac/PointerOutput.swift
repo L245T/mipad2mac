@@ -69,6 +69,8 @@ final class PointerOutput {
     private var pressLocation = CGPoint.zero
     private var postedLeft = false
     private var postedRight = false
+    private var clicks = ClickSequence()
+    private var contactStarted: TimeInterval = 0
     var rightClickCount = 0
     var rightEventCount = 0
 
@@ -90,6 +92,7 @@ final class PointerOutput {
             // An immediate click may activate its own target. Other activation cancels the contact.
             if app.processIdentifier == self.candidateTarget {
                 self.candidateFrontmost = app.processIdentifier
+                if self.gesture.isIdle { self.clicks.reset() }
             } else {
                 self.longPressDiagnostic("输入结束：前台应用切换")
                 self.release()
@@ -164,11 +167,12 @@ final class PointerOutput {
     private func emit(_ events: [PointerEvent]) {
         for planned in events {
             if planned.action == .down {
-                let nearby = hypot(planned.point.x - lastClickPoint.x, planned.point.y - lastClickPoint.y) < 5
-                clickCount = nearby && ProcessInfo.processInfo.systemUptime - lastRelease < NSEvent.doubleClickInterval ? min(clickCount + 1, 3) : 1
-                lastClickPoint = planned.point
+                clickCount = clicks.begin(at: planned.point, now: contactStarted, interval: NSEvent.doubleClickInterval)
             }
+            if planned.action == .drag { clicks.drag(to: planned.point) }
+            if planned.action == .rightDown { clicks.reset() }
             if !send(planned.action, at: planned.point) {
+                clicks.reset()
                 // Release only buttons we actually submitted and suppress this contact after a failed post setup.
                 let cancelled = gesture.cancelNavigation()
                 emitScroll(cancelled.scroll)
@@ -181,8 +185,6 @@ final class PointerOutput {
     var lastPoint = CGPoint.zero
     private var lastTabletPoint = CGPoint.zero
     var mapping = Mapping(bounds: .zero)
-    var lastRelease = -Double.infinity
-    var lastClickPoint = CGPoint.zero
     var clickCount: Int64 = 1
     var downCount = 0
     var upCount = 0
@@ -194,6 +196,7 @@ final class PointerOutput {
         currentSample = sample
         let contact = sample.touching && sample.inRange && !sample.eraser
         if gesture.isIdle && contact && sample.positionValid {
+            contactStarted = ProcessInfo.processInfo.systemUptime
             pressLocation = mapping.point(x: sample.x, y: sample.y)
             let frontmost = NSWorkspace.shared.frontmostApplication
             let frontmostExcluded = frontmost?.bundleIdentifier.map { longPress.excludes($0) } ?? false
@@ -248,11 +251,12 @@ final class PointerOutput {
         if postedRight { _ = send(.rightUp, at: lastPoint) }
         if inProximity { sendProximity(false, at: lastPoint) }
         currentSample = nil; contactSample = nil
+        clicks.reset()
     }
     private func emitScroll(_ events: [PenScrollEvent]) {
         for event in events {
             // A scroll sequence is never part of a later multiple-click sequence.
-            lastRelease = -Double.infinity
+            clicks.reset()
             guard sendScroll(event) else {
                 let cancelled = gesture.cancelNavigation()
                 for end in cancelled.scroll { _ = sendScroll(end) }
@@ -352,13 +356,13 @@ final class PointerOutput {
         if right { rightEventCount += 1 }
         if action == .rightDown { postedRight = true }
         if action == .rightUp {
-            postedRight = false; rightClickCount += 1; lastRelease = -Double.infinity
+            postedRight = false; rightClickCount += 1; clicks.reset()
             longPressDiagnostic("长按右键已提交：\(candidateTarget.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier } ?? "未知")；目标软件响应待验证")
         }
         if action == .move { moveCount += 1 }
         if action == .drag { dragCount += 1 }
         lastPoint = point
-        if action == .up { lastRelease = ProcessInfo.processInfo.systemUptime }
+        if action == .up { clicks.end(now: ProcessInfo.processInfo.systemUptime, interval: NSEvent.doubleClickInterval) }
         return true
     }
 }
