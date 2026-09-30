@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var inputAllowed = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let startupSource = SystemStartupSource.detect(NSAppleEventManager.shared().currentAppleEvent)
         // Load directly from this bundle so Dock does not depend on stale Launch Services icon metadata.
         if let iconURL = Bundle.main.url(forResource: "MiPad2Mac", withExtension: "icns"),
            let icon = NSImage(contentsOf: iconURL) {
@@ -99,9 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NotificationCenter.default.addObserver(self, selector: #selector(displayChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.disable() }
         refreshStats()
-        startupCoordinator.initialize(current: CurrentReleaseIdentity.snapshot())
-        if startupCoordinator.notices.isEmpty { showWindow() }
-        else { startupCoordinator.presentNotices(app: self) }
+        startupCoordinator.initialize(current: CurrentReleaseIdentity.snapshot(), systemSource: startupSource)
+        if startupCoordinator.presentation.showMainWindow { presentMainWindow() }
+        if startupCoordinator.presentation.showMigrationNotice { startupCoordinator.presentNotices(app: self) }
         attemptAutoStart()
         updateChecker.changed = { [weak self] text in self?.updateLabel.stringValue = text }
         updateLabel.stringValue = updateChecker.idleMessage
@@ -189,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         screenPicker.selectItem(at: sender.tag); mappingChanged()
     }
     @objc func menuToggle() {
+        startupCoordinator.userDidOpenWindow()
         toggle()
         if !enabled && statusLabel.stringValue != "鼠标控制已暂停" { showWindow() }
     }
@@ -517,6 +519,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         reader.start()
     }
     @objc func showWindow() {
+        startupCoordinator.userDidOpenWindow()
+        presentMainWindow()
+    }
+    private func presentMainWindow() {
         NSApp.setActivationPolicy(.regular)
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
@@ -556,6 +562,7 @@ if CommandLine.arguments.contains("--probe") {
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
-    app.setActivationPolicy(.regular)
+    // Delay foreground presentation until the startup source and migration decision are known.
+    app.setActivationPolicy(.accessory)
     app.run()
 }

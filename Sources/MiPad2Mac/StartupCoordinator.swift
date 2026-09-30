@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 import SwiftUI
 import Security
 import ApplicationServices
@@ -38,6 +39,15 @@ enum MigrationCatalog {
     }
 }
 
+enum SystemStartupSource {
+    static func detect(_ event: NSAppleEventDescriptor?) -> StartupSource {
+        // Apple's open-application event stores login launch information in keyAEPropData.
+        guard let event, event.eventClass == kCoreEventClass, event.eventID == kAEOpenApplication,
+              event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem else { return .user }
+        return .loginItem
+    }
+}
+
 final class StartupCoordinator: NSObject, NSWindowDelegate {
     static let historyKey = "startupMigrationHistory.v1"
     let defaults: UserDefaults
@@ -45,18 +55,32 @@ final class StartupCoordinator: NSObject, NSWindowDelegate {
     private(set) var current: LaunchSnapshot?
     private(set) var notices: [MigrationSelection] = []
     private(set) var initialized = false
+    private(set) var source: StartupSource = .user
+    private(set) var presentation = StartupPresentation.decide(source: .user, silentLogin: true, hasMigrationNotice: false)
+    private var validatedRestart: UpdateRestartContext?
+    private var userOpenedWindow = false
     private var noticeWindow: NSWindow?
     /// Updater connects after validating its transaction; called before any permission/notice presentation.
     var coreInitializationCompleted: ((LaunchSnapshot) -> Void)?
-    var suppressPermissionPresentation: Bool { !initialized || !notices.isEmpty }
+    var suppressPermissionPresentation: Bool {
+        !initialized || !notices.isEmpty || (!userOpenedWindow && presentation.suppressAutomaticPermissionWindow)
+    }
+    /// 013 must validate nonce/path/version/publisher before supplying this context and connecting its receipt callback.
+    func acceptValidatedUpdateRestart(_ context: UpdateRestartContext) {
+        guard !initialized, context.source.valid else { return }
+        validatedRestart = context
+    }
+    func userDidOpenWindow() { userOpenedWindow = true }
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         history = MigrationHistory.decode(defaults.data(forKey: Self.historyKey))
         super.init()
     }
-    func initialize(current: LaunchSnapshot, trustedSource: LaunchSnapshot? = nil, rules: [MigrationRule] = MigrationCatalog.rules) {
+    func initialize(current: LaunchSnapshot, systemSource: StartupSource = .user, rules: [MigrationRule] = MigrationCatalog.rules) {
         self.current = current
-        notices = MigrationNotices.prepare(current: current, trustedSource: trustedSource, history: &history, rules: rules)
+        source = validatedRestart.map(StartupSource.updater) ?? systemSource
+        notices = MigrationNotices.prepare(current: current, trustedSource: validatedRestart?.source, history: &history, rules: rules)
+        presentation = StartupPresentation.decide(source: source, silentLogin: StartupPreferences.silentLogin(in: defaults), hasMigrationNotice: !notices.isEmpty)
         persist(); initialized = true
         coreInitializationCompleted?(current)
     }
@@ -74,6 +98,7 @@ final class StartupCoordinator: NSObject, NSWindowDelegate {
             w.contentViewController = NSHostingController(rootView: MigrationNoticeView(model: app.tabs.model, coordinator: self))
             noticeWindow = w
         }
+        NSApp.setActivationPolicy(.regular)
         noticeWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func acknowledge() {
@@ -81,6 +106,9 @@ final class StartupCoordinator: NSObject, NSWindowDelegate {
         notices = []; noticeWindow?.close(); noticeWindow = nil
     }
     func later() { noticeWindow?.close() }
+    func windowWillClose(_ notification: Notification) {
+        if !presentation.showMainWindow && !userOpenedWindow { NSApp.setActivationPolicy(.accessory) }
+    }
     // Window close/later never acknowledges a notice. Pending suppresses duplicate permission windows this session.
 }
 
