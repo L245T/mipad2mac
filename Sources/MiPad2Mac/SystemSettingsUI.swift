@@ -19,7 +19,7 @@ final class SettingsPresentation: ObservableObject {
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
-            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined()]
+            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy)]
             + (app.monitoring ? [app.countsLabel.stringValue, app.sampleLabel.stringValue, app.packetLabel.stringValue, app.controlLabel.stringValue, app.testRecord.displayText] : [])
         let next = fields.joined(separator: "\u{1f}")
         if next != signature { signature = next; generation += 1 }
@@ -403,13 +403,14 @@ struct SettingsDetail: View {
             SettingsSection {
                 SettingsPicker("更新渠道", selection: Binding(get: { app.updateChecker.channel }, set: { value in model.act { app.updateChecker.selectChannel(value) } })) {
                     ForEach(UpdateChannel.allCases, id: \.rawValue) { Text($0.title).tag($0) }
-                }
+                }.disabled(app.nativeUpdater.installationActive)
                 LabeledContent("软件更新") { Button("检查更新…") { app.checkUpdates() } }
                 Toggle("自动检查更新", isOn: Binding(get: { app.autoUpdate.state == .on }, set: { value in model.act { app.autoUpdate.state = value ? .on : .off; app.updatePreferenceChanged() } }))
                 SettingsPicker("检查周期", selection: Binding(get: { app.updateChecker.interval }, set: { value in model.act { app.updateChecker.selectInterval(value) } })) {
                     ForEach(UpdateInterval.allCases, id: \.rawValue) { Text($0.title).tag($0) }
-                }.disabled(app.autoUpdate.state != .on)
+                }.disabled(app.autoUpdate.state != .on || app.nativeUpdater.installationActive)
                 Text(app.updateLabel.stringValue).font(.callout).foregroundStyle(.secondary)
+                NativeUpdateControls(updater: app.nativeUpdater, app: app)
             } header: { Text("版本更新") } footer: { footerNote("稳定版仅检查正式发布；Beta渠道也检查预发布。自动检查不会下载或安装更新，手动检查不受所选周期限制。") }
             SettingsSection("赞助") {
                 Text("如果这个工具对你有帮助，欢迎自愿赞助。")

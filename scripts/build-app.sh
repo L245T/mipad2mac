@@ -12,7 +12,7 @@ BUILD_SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 BUILD_SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 swift build -c release --disable-sandbox --cache-path .build/cache --sdk "$BUILD_SDK_PATH" \
     -Xlinker -platform_version -Xlinker macos -Xlinker 13.0 -Xlinker "$BUILD_SDK_VERSION"
-LINKED_SDK_VERSION="$(xcrun otool -l .build/release/MiPad2Mac | awk '$1 == "sdk" {print $2; exit}')"
+LINKED_SDK_VERSION="$(xcrun otool -l .build/release/MiPad2Mac | awk '$1 == "sdk" && !found {print $2; found=1}')"
 [[ "$LINKED_SDK_VERSION" == "$BUILD_SDK_VERSION" ]] || { echo "Linked SDK does not match the selected SDK; refusing package." >&2; exit 1; }
 OUTPUT_DIR="${MIPAD_OUTPUT_DIR:-$PWD/dist}"
 mkdir -p "$OUTPUT_DIR"
@@ -25,6 +25,7 @@ bash scripts/build-icon.sh "$APP/Contents/Resources/MiPad2Mac.icns"
 mkdir -p "$APP/Contents/Resources/Sponsor"
 cp assets/sponsor/wechat.png assets/sponsor/alipay.jpg "$APP/Contents/Resources/Sponsor/"
 cp .build/release/MiPad2Mac "$APP/Contents/MacOS/MiPad2Mac"
+cp .build/release/MiPad2MacUpdater "$APP/Contents/MacOS/MiPad2MacUpdater"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

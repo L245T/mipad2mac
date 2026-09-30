@@ -56,7 +56,12 @@ public enum UpdateChannel: String, CaseIterable {
     public var title: String { self == .stable ? "稳定版" : "Beta 版" }
 }
 
-public struct PublishedRelease: Decodable {
+public struct PublishedRelease: Codable {
+    public let id: Int?
+    public let assets: [ReleaseAsset]?
+    public init(tag_name: String, draft: Bool, prerelease: Bool, id: Int? = nil, assets: [ReleaseAsset]? = nil) {
+        self.tag_name = tag_name; self.draft = draft; self.prerelease = prerelease; self.id = id; self.assets = assets
+    }
     public let tag_name: String
     public let draft: Bool
     public let prerelease: Bool
@@ -82,5 +87,15 @@ public struct PublishedRelease: Decodable {
         var url = URLComponents(string: "https://github.com/L245T/mipad2mac")!
         url.path = "/L245T/mipad2mac/releases/tag/" + tag_name
         return url.url
+    }
+}
+
+public struct ReleaseAsset: Codable, Equatable {
+    public let id: Int
+    public let name: String
+    public let size: Int64
+    public let browser_download_url: URL
+    public init(id: Int, name: String, size: Int64, browser_download_url: URL) {
+        self.id = id; self.name = name; self.size = size; self.browser_download_url = browser_download_url
     }
 }

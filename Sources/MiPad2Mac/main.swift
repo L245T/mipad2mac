@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var tabletDisplayIDs: [UInt32] = []
     let startupCoordinator = StartupCoordinator()
     let updateChecker = UpdateChecker()
+    let nativeUpdater = NativeUpdater()
     let testRecord = TestRecord()
     let settingsPage = SettingsPage()
     let sponsorSection = SponsorSection()
@@ -99,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NotificationCenter.default.addObserver(self, selector: #selector(displayChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in self?.disable() }
         refreshStats()
+        nativeUpdater.connect(self)
         startupCoordinator.initialize(current: CurrentReleaseIdentity.snapshot(), systemSource: startupSource)
         // Do not implicitly open a protected input device before the startup permission decision.
         readerStartupDeferred = !inputAllowed
@@ -210,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
-    @objc func checkUpdates() { tabs.selectTabViewItem(at: 4); showSelectedPage(); updateChecker.check(manual: true, window: window) }
+    @objc func checkUpdates() { guard !nativeUpdater.installationActive else { return }; tabs.selectTabViewItem(at: 4); showSelectedPage(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
         updateChecker.setAutomatically(autoUpdate.state == .on)
     }
