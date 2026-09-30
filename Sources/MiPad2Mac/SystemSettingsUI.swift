@@ -19,7 +19,7 @@ final class SettingsPresentation: ObservableObject {
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
-            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy)]
+            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy), String(app.updateChecker.scheduler.state.active != nil)]
             + (app.monitoring ? [app.countsLabel.stringValue, app.sampleLabel.stringValue, app.packetLabel.stringValue, app.controlLabel.stringValue, app.testRecord.displayText] : [])
         let next = fields.joined(separator: "\u{1f}")
         if next != signature { signature = next; generation += 1 }
@@ -385,7 +385,7 @@ struct SettingsDetail: View {
                 if !app.settingsPage.loginStatus.isHidden { Text(app.settingsPage.loginStatus.stringValue).foregroundStyle(.orange) }
                 if !app.settingsPage.loginError.stringValue.isEmpty { Text(app.settingsPage.loginError.stringValue).foregroundStyle(.red) }
                 LabeledContent("登录项管理") { Button("系统设置…") { app.settingsPage.openLoginSettings() }; Button("重新检查") { model.act { app.settingsPage.refresh() } } }
-            } header: { Text("启动") } footer: { footerNote("登录启动可留在菜单栏，手动打开仍显示窗口；新的权限变更说明会单独显示。登录项待批准时，请在“通用 → 登录项与扩展”允许MiPad2Mac。") }
+            } header: { Text("启动") } footer: { footerNote("登录启动可留在菜单栏，手动打开仍显示窗口；需要重新授权时进入权限检查页。登录项待批准时，请在“通用 → 登录项与扩展”允许MiPad2Mac。") }
         }
     }
     private var about: some View {
@@ -403,15 +403,26 @@ struct SettingsDetail: View {
             SettingsSection {
                 SettingsPicker("更新渠道", selection: Binding(get: { app.updateChecker.channel }, set: { value in model.act { app.updateChecker.selectChannel(value) } })) {
                     ForEach(UpdateChannel.allCases, id: \.rawValue) { Text($0.title).tag($0) }
-                }.disabled(app.nativeUpdater.installationActive)
-                LabeledContent("软件更新") { Button("检查更新…") { app.checkUpdates() } }
+                }.disabled(app.nativeUpdater.busy)
+                LabeledContent("软件更新") {
+                    Button(app.updateChecker.scheduler.state.active == nil ? "检查更新…" : "正在检查…") { app.checkUpdates() }
+                        .disabled(app.nativeUpdater.busy || app.updateChecker.scheduler.state.active != nil)
+                }
+                Text(app.updateLabel.stringValue).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                NativeUpdateControls(updater: app.nativeUpdater, app: app)
+            } header: { Text("版本更新") } footer: {
+                footerNote("稳定版仅检查正式发布；Beta渠道也检查预发布。")
+            }
+            SettingsSection {
                 Toggle("自动检查更新", isOn: Binding(get: { app.autoUpdate.state == .on }, set: { value in model.act { app.autoUpdate.state = value ? .on : .off; app.updatePreferenceChanged() } }))
+                    .disabled(app.nativeUpdater.busy)
                 SettingsPicker("检查周期", selection: Binding(get: { app.updateChecker.interval }, set: { value in model.act { app.updateChecker.selectInterval(value) } })) {
                     ForEach(UpdateInterval.allCases, id: \.rawValue) { Text($0.title).tag($0) }
-                }.disabled(app.autoUpdate.state != .on || app.nativeUpdater.installationActive)
-                Text(app.updateLabel.stringValue).font(.callout).foregroundStyle(.secondary)
-                NativeUpdateControls(updater: app.nativeUpdater, app: app)
-            } header: { Text("版本更新") } footer: { footerNote("稳定版仅检查正式发布；Beta渠道也检查预发布。自动检查不会下载或安装更新，手动检查不受所选周期限制。") }
+                }.disabled(app.autoUpdate.state != .on || app.nativeUpdater.busy)
+            } header: { Text("自动检查") } footer: {
+                footerNote("后台检查只提示新版本，不自动下载或安装。手动检查不受所选周期限制。")
+            }
             SettingsSection("赞助") {
                 Text("如果这个工具对你有帮助，欢迎自愿赞助。")
                 HStack(alignment: .top, spacing: 24) { sponsor("微信", file: "wechat", ext: "png"); sponsor("支付宝", file: "alipay", ext: "jpg") }.frame(maxWidth: .infinity)

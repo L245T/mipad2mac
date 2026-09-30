@@ -212,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
-    @objc func checkUpdates() { guard !nativeUpdater.installationActive else { return }; tabs.selectTabViewItem(at: 4); showSelectedPage(); updateChecker.check(manual: true, window: window) }
+    @objc func checkUpdates() { guard !nativeUpdater.busy else { return }; tabs.selectTabViewItem(at: 4); showSelectedPage(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
         updateChecker.setAutomatically(autoUpdate.state == .on)
     }

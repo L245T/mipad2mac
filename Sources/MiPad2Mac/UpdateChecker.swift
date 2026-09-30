@@ -25,7 +25,7 @@ final class UpdateChecker {
     var channel: UpdateChannel { scheduler.state.channel }
     var interval: UpdateInterval { scheduler.state.interval }
     var idleMessage: String {
-        "更新渠道：\(channel.title)。自动检查\(scheduler.state.enabled ? "：" + interval.title : "已关闭")；可随时手动检查。"
+        "点“检查更新”查看可用版本。"
     }
     var availableRelease: PublishedRelease? {
         candidate?.isNewer(than: appVersion, channel: channel) == true ? candidate : nil
@@ -37,7 +37,7 @@ final class UpdateChecker {
         candidate = nil
         defaults.set(value.rawValue, forKey: "updateChannel")
         candidateChanged(nil, value, nil)
-        changed("更新渠道：\(value.title)。")
+        changed("已切换至\(value.title)，点“检查更新”查看可用版本。")
         scheduler.configurationChanged()
     }
     func selectInterval(_ value: UpdateInterval) {
@@ -56,8 +56,8 @@ final class UpdateChecker {
         manualWindow = window
         guard scheduler.requestManual() else {
             manualWindow = nil
-            let message = "更新服务要求稍后再试；请在服务冷却时间结束后重新检查。"
-            changed(message); showResult(message, release: nil, window: window)
+            let message = "更新服务暂时限制检查频率，请稍后再试。"
+            changed(message); showResult(message, release: nil, window: window, succeeded: false)
             return
         }
     }
@@ -95,47 +95,54 @@ final class UpdateChecker {
                     if token.manual, let window, self.channel == token.channel,
                        self.scheduler.state.generation == token.generation {
                         let download = release?.isNewer(than: appVersion, channel: token.channel) == true || ReleaseVersion(appVersion) == nil ? release : nil
-                        self.showResult(message, release: download, window: window)
+                        self.showResult(message, release: download, window: window, succeeded: outcome == .success)
                     }
                 }
                 if error != nil { finish("无法检查更新，请检查网络后重试。", outcome: .failure(retryAfter: retryAfter)); return }
                 guard http?.statusCode == 200 else {
-                    finish("更新服务暂不可用（HTTP \(http?.statusCode ?? 0)），无法判断是否有更新。", outcome: .failure(retryAfter: retryAfter)); return
+                    finish("更新服务暂不可用，请稍后重试。", outcome: .failure(retryAfter: retryAfter)); return
                 }
                 guard let data, data.count <= 4_194_304, bytes + data.count <= 10_485_760,
                       let batch = try? JSONDecoder().decode([PublishedRelease].self, from: data) else {
-                    finish("版本列表格式异常或超过读取上限，无法判断是否有更新。", outcome: .failure(retryAfter: retryAfter)); return
+                    finish("无法读取版本列表，请稍后重试。", outcome: .failure(retryAfter: retryAfter)); return
                 }
                 let all = releases + batch
                 if http?.value(forHTTPHeaderField: "Link")?.contains("rel=\"next\"") == true {
-                    guard page < 10 else { finish("版本列表超过读取上限，无法判断是否有更新。", outcome: .failure(retryAfter: retryAfter)); return }
+                    guard page < 10 else { finish("版本列表过长，本次检查未完成，请稍后重试。", outcome: .failure(retryAfter: retryAfter)); return }
                     self.fetch(page: page + 1, releases: all, bytes: bytes + data.count, token: token)
                     return
                 }
                 guard let release = PublishedRelease.latest(in: all, channel: token.channel) else {
-                    finish("未找到可比较的\(token.channel.title)版本；不能据此判断当前版本是否最新。", outcome: .success); return
+                    finish("\(token.channel.title)渠道暂无可比较的版本，暂时无法确认是否有更新。", outcome: .success); return
                 }
                 guard ReleaseVersion(appVersion) != nil else {
-                    finish("当前版本\(appVersion)无法自动排序。可打开发布页面查看\(release.tag_name)。", outcome: .success, release: release); return
+                    finish("当前版本号\(appVersion)无法比较，请到下载页面查看\(release.tag_name)。", outcome: .success, release: release); return
                 }
                 if release.isNewer(than: appVersion, channel: token.channel) {
                     let kind = release.isPrerelease ? "预发布版" : "正式版"
-                    finish("发现\(kind)\(release.tag_name)（当前\(appVersion)）。", outcome: .success, release: release)
+                    finish("当前版本\(appVersion)，可更新至\(release.tag_name)（\(kind)）。", outcome: .success, release: release)
                 } else {
-                    finish("当前\(appVersion)，\(token.channel.title)渠道没有发现版本号更高的更新。", outcome: .success, release: release)
+                    finish("当前版本\(appVersion)。本次未发现版本号更高的\(token.channel.title)更新。", outcome: .success, release: release)
                 }
             }
         }
         task?.resume()
     }
-    private func showResult(_ message: String, release: PublishedRelease?, window: NSWindow) {
-        let alert = NSAlert(); alert.messageText = "检查更新 · \(channel.title)"; alert.informativeText = message
-        alert.addButton(withTitle: "好")
-        // Preserve the manual-download route until 013 supplies a trusted installation candidate.
-        let url = release?.downloadURL
-        if url != nil { alert.addButton(withTitle: "打开下载页面") }
-        alert.beginSheetModal(for: window) { response in
-            if response == .alertSecondButtonReturn, let url { NSWorkspace.shared.open(url) }
-        }
+    private func showResult(_ message: String, release: PublishedRelease?, window: NSWindow, succeeded: Bool) {
+        let alert = NSAlert()
+        alert.alertStyle = succeeded ? .informational : .warning
+        alert.messageText = release == nil ? (succeeded ? "更新检查结果" : "未能完成更新检查") : "发现可用版本"
+        alert.informativeText = message
+        if let release, release.isNewer(than: appVersion, channel: channel) {
+            // The manual entry already selected About. Dismissing reveals the same updater controls.
+            alert.addButton(withTitle: "查看更新"); alert.addButton(withTitle: "稍后")
+        } else if let url = release?.downloadURL {
+            alert.addButton(withTitle: "前往下载页面"); alert.addButton(withTitle: "取消")
+            alert.beginSheetModal(for: window) { response in
+                if response == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+            }
+            return
+        } else { alert.addButton(withTitle: "好") }
+        alert.beginSheetModal(for: window)
     }
 }
