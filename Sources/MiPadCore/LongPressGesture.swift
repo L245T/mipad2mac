@@ -220,6 +220,10 @@ public final class LongPressPreferences {
         get { defaults.dictionary(forKey: "penLongPressExcludedApps") as? [String: String] ?? ["com.adobe.Photoshop": "Adobe Photoshop"] }
         set { defaults.set(newValue, forKey: "penLongPressExcludedApps") }
     }
+    /// An absent key supplies an implicit drawing default, not a user-created list entry.
+    public var configuredExclusions: [String: String] {
+        defaults.dictionary(forKey: "penLongPressExcludedApps") as? [String: String] ?? [:]
+    }
     public var compatibilityEnabled: Bool {
         get { defaults.object(forKey: "penRightClickCompatibilityEnabled") as? Bool ?? false }
         set { defaults.set(newValue, forKey: "penRightClickCompatibilityEnabled") }

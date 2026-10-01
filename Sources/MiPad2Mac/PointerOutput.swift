@@ -30,6 +30,7 @@ final class PointerOutput {
     private var nextWindowValidation: TimeInterval = 0
     private let diagnosticOwnWindow: Bool
     private let diagnosticHitUnavailable: () -> Bool
+    private let diagnosticWindowUnavailable: () -> Bool
     let momentumPreferences: ScrollMomentumPreferences
     private var momentum = PenScrollMomentum()
     private var momentumTimer: Timer?
@@ -45,6 +46,8 @@ final class PointerOutput {
     var profileName: String { selectedProfileName ?? lastExternalApplication?.localizedName ?? "请先选择应用" }
     var profileExcluded: Bool { profileMode == .drawing }
     var profileMode: PenApplicationMode { applicationProfiles.mode(for: profileID) }
+    /// The independent list never includes the foreground app or implicit built-in defaults.
+    var configuredProfiles: [PenApplicationProfile] { applicationProfiles.configuredApplications }
     var profileApplications: [String: String] {
         var apps = applicationProfiles.applications
         if let id = profileID { apps[id] = profileName }
@@ -57,9 +60,29 @@ final class PointerOutput {
     }
     func changeNavigation(_ mode: PenApplicationMode) {
         guard let id = profileID else { return }
+        setApplicationProfileMode(mode, for: id, name: profileName)
+    }
+    @discardableResult func addApplicationProfile(bundleID: String, name: String) -> Bool {
+        guard !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         release()
-        applicationProfiles.set(mode, for: id, name: profileName)
-        longPressDiagnostic("应用默认模式：\(profileName) → \(mode.title)；已结束当前接触")
+        return applicationProfiles.add(for: bundleID, name: name) != nil
+    }
+    /// A list row passes its own ID; it must not change the current-app/HID-menu selection.
+    func setApplicationProfileMode(_ mode: PenApplicationMode, for bundleID: String, name: String) {
+        guard !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        release()
+        applicationProfiles.set(mode, for: bundleID, name: name)
+        longPressDiagnostic("应用默认模式：\(name) → \(mode.title)；已结束当前接触")
+    }
+    func removeApplicationProfile(bundleID: String) {
+        let id = bundleID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !id.isEmpty else { return }
+        release()
+        applicationProfiles.remove(for: id)
+        if selectedProfileID?.lowercased() == id {
+            selectedProfileID = nil; selectedProfileName = nil
+        }
+        longPressDiagnostic("已移除应用笔模式：\(id)；回到默认浏览，已结束当前接触")
     }
     func chooseNavigationApplication() {
         release()
@@ -74,7 +97,7 @@ final class PointerOutput {
         selectedProfileName = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
             ?? url.deletingPathExtension().lastPathComponent
-        applicationProfiles.set(applicationProfiles.mode(for: id), for: id, name: profileName)
+        addApplicationProfile(bundleID: id, name: profileName)
     }
     private var longPressTimer: Timer?
     private var applicationObserver: NSObjectProtocol?
@@ -94,10 +117,12 @@ final class PointerOutput {
 
     init(defaults: UserDefaults = .standard, observeApplications: Bool = true,
          diagnosticOwnWindow: Bool = false,
-         diagnosticHitUnavailable: @escaping () -> Bool = { false }) {
+         diagnosticHitUnavailable: @escaping () -> Bool = { false },
+         diagnosticWindowUnavailable: @escaping () -> Bool = { false }) {
         // Only the explicit, isolated local-event diagnostic can scroll its own receiver window.
         self.diagnosticOwnWindow = diagnosticOwnWindow && !observeApplications
         self.diagnosticHitUnavailable = diagnosticOwnWindow && !observeApplications ? diagnosticHitUnavailable : { false }
+        self.diagnosticWindowUnavailable = diagnosticOwnWindow && !observeApplications ? diagnosticWindowUnavailable : { false }
         momentumPreferences = ScrollMomentumPreferences(defaults: defaults)
         longPress = LongPressPreferences(defaults: defaults)
         navigation = PenNavigationPreferences(defaults: defaults)
@@ -145,6 +170,7 @@ final class PointerOutput {
         let layer: Int
     }
     private func window(at point: CGPoint) -> ScrollWindow? {
+        if diagnosticWindowUnavailable() { return nil }
         guard let top = NSScreen.screens.first?.frame.maxY else { return nil }
         let number = NSWindow.windowNumber(at: NSPoint(x: point.x, y: top - point.y), belowWindowWithWindowNumber: 0)
         guard number > 0, let id = CGWindowID(exactly: number),
@@ -296,25 +322,25 @@ final class PointerOutput {
             contactStarted = now
             pressLocation = mapping.point(x: sample.x, y: sample.y)
             let frontmost = NSWorkspace.shared.frontmostApplication
-            let hit = (longPress.enabled || applicationProfiles.hasBrowseApplications) ? target(at: pressLocation) : nil
-            let topWindow = (hit == nil || applicationProfiles.hasBrowseApplications) ? window(at: pressLocation) : nil
+            // Default browse needs region/window lookup even with an empty saved-app list or long press off.
+            let hit = target(at: pressLocation)
+            let topWindow = window(at: pressLocation)
             let matchingHit = topWindow == nil || hit?.app?.processIdentifier == topWindow?.app.processIdentifier ? hit : nil
             let resolvedApp = topWindow?.app ?? matchingHit?.app
             let targetApp = matchingHit?.app
             let appMode = applicationProfiles.mode(for: resolvedApp?.bundleIdentifier ?? frontmost?.bundleIdentifier)
             let unknown = matchingHit?.region == nil || matchingHit?.region == .unknown
-            let fallbackEligible = topWindow.map {
-                $0.layer == 0 && (diagnosticOwnWindow || $0.app.processIdentifier != ProcessInfo.processInfo.processIdentifier)
-                    && UnknownBrowseArea.contains(pressLocation, in: $0.bounds)
-            } ?? false
-            fallbackContact = appMode == .browse && unknown && fallbackEligible
+            contactMode = PenBrowseRouting.mode(applicationMode: appMode, region: matchingHit?.region ?? .unknown,
+                point: pressLocation, windowBounds: topWindow?.bounds, windowLayer: topWindow?.layer,
+                ownWindow: topWindow?.app.processIdentifier == ProcessInfo.processInfo.processIdentifier,
+                allowOwnWindow: diagnosticOwnWindow)
+            fallbackContact = contactMode == .browse && unknown
             fallbackWindow = fallbackContact ? topWindow : nil
             nextWindowValidation = 0
             if fallbackContact { longPressDiagnostic("未知区域持续浏览：\(resolvedApp?.bundleIdentifier ?? "未知")；窗口顶部保留拖动") }
             contactClickTolerance = appMode == .drawing ? 0 : clickPreferences.jitterTolerance
             candidateTarget = fallbackContact ? topWindow?.app.processIdentifier : targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
-            contactMode = appMode == .browse && (matchingHit?.region == .content || fallbackContact) ? .browse : .pointer
             // Second/third held taps retain selection, including unknown custom content.
             let multiTapSelection = contactMode == .browse
                 && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval,

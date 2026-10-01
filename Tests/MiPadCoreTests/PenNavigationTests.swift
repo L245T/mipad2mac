@@ -117,15 +117,19 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
     defer { defaults.removePersistentDomain(forName: suite) }
     let preferences = PenNavigationPreferences(defaults: defaults)
     #expect(preferences.mode(for: nil) == .pointer)
-    #expect(preferences.mode(for: "unknown") == .pointer)
+    #expect(preferences.mode(for: "unknown") == .browse)
+    #expect(preferences.configuredMode(for: "unknown") == nil)
     preferences.set(.browse, for: "com.google.Chrome", name: "Chrome")
     let restored = PenNavigationPreferences(defaults: defaults)
     #expect(restored.mode(for: "COM.GOOGLE.CHROME") == .browse)
     #expect(restored.mode(for: "com.google.Chrome", excluded: true) == .pointer)
-    #expect(restored.applications["com.google.Chrome"] == "Chrome")
+    #expect(restored.applications["com.google.chrome"] == "Chrome")
     #expect(restored.hasBrowseApplications)
     defaults.set(["com.google.chrome": "corrupt"], forKey: "penNavigationApplicationModes")
-    #expect(restored.mode(for: "com.google.Chrome") == .pointer)
+    #expect(restored.mode(for: "com.google.Chrome") == .browse)
+    preferences.set(.pointer, for: "COM.GOOGLE.CHROME", name: "Chrome")
+    #expect(restored.mode(for: "com.google.chrome") == .pointer)
+    #expect(restored.configuredMode(for: "com.google.chrome") == .pointer)
 }
 
 @Test func invalidPositionEndsImmediateDrawingWithoutJump() {

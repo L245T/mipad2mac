@@ -14,8 +14,34 @@ public enum PenApplicationMode: String, CaseIterable {
     }
 }
 
-/// New explicit profiles override the legacy navigation/exclusion pair. Legacy data stays intact.
+/// Bundle IDs are case insensitive; a canonical key wins over duplicate legacy spellings.
+enum PenApplicationID {
+    static func normalize(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let id = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return id.isEmpty ? nil : id
+    }
+    static func dictionary(_ values: [String: String]) -> [String: String] {
+        var result: [String: String] = [:]
+        let keys = values.keys.sorted {
+            let firstCanonical = $0 == normalize($0), secondCanonical = $1 == normalize($1)
+            if firstCanonical != secondCanonical { return !firstCanonical }
+            return $0 < $1
+        }
+        for key in keys { if let id = normalize(key) { result[id] = values[key] } }
+        return result
+    }
+}
+
+public struct PenApplicationProfile: Equatable {
+    public let bundleID: String
+    public let name: String
+    public let mode: PenApplicationMode
+}
+
+/// Explicit profiles override legacy choices. Removing a profile also removes its legacy records.
 public final class PenApplicationPreferences {
+    public static let defaultMode = PenApplicationMode.browse
     private let defaults: UserDefaults
     private let navigation: PenNavigationPreferences
     private let longPress: LongPressPreferences
@@ -23,30 +49,77 @@ public final class PenApplicationPreferences {
         self.defaults = defaults; navigation = PenNavigationPreferences(defaults: defaults)
         longPress = LongPressPreferences(defaults: defaults)
     }
-    public var applications: [String: String] {
-        var result: [String: String] = [:]
-        for dictionary in [longPress.exclusions, navigation.applications,
-                           defaults.dictionary(forKey: "penApplicationInteractionNames") as? [String: String] ?? [:]] {
-            for (id, name) in dictionary { result[id.lowercased()] = name }
+    private func dictionary(_ key: String) -> [String: String] {
+        PenApplicationID.dictionary(defaults.dictionary(forKey: key) as? [String: String] ?? [:])
+    }
+    private var removedLegacyIDs: Set<String> {
+        Set((defaults.stringArray(forKey: "penApplicationRemovedLegacyIDs") ?? []).compactMap(PenApplicationID.normalize))
+    }
+    /// Only stored choices/additions belong in the list; implicit defaults and foreground apps do not.
+    /// Drawing rows come first, then names, with Bundle ID breaking name ties.
+    public var configuredApplications: [PenApplicationProfile] {
+        var names: [String: String] = [:]
+        let exclusions = PenApplicationID.dictionary(longPress.configuredExclusions)
+        for layer in [exclusions, PenApplicationID.dictionary(navigation.applications),
+                      dictionary("penApplicationInteractionNames")] {
+            names.merge(layer) { _, newer in newer }
         }
-        return result
+        let ids = Set(names.keys).union(dictionary("penNavigationApplicationModes").keys)
+            .union(dictionary("penApplicationInteractionModes").keys).subtracting(removedLegacyIDs)
+        return ids.map { id in
+            let name = names[id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return PenApplicationProfile(bundleID: id, name: name?.isEmpty == false ? name! : id, mode: mode(for: id))
+        }.sorted {
+            if ($0.mode == .drawing) != ($1.mode == .drawing) { return $0.mode == .drawing }
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame ? $0.bundleID < $1.bundleID : order == .orderedAscending
+        }
+    }
+    public var applications: [String: String] {
+        Dictionary(uniqueKeysWithValues: configuredApplications.map { ($0.bundleID, $0.name) })
     }
     public func mode(for id: String?) -> PenApplicationMode {
-        guard let id, !id.isEmpty else { return .pointer }
-        if let raw = (defaults.dictionary(forKey: "penApplicationInteractionModes") as? [String: String])?[id.lowercased()],
+        guard let id = PenApplicationID.normalize(id) else { return .pointer }
+        if let raw = dictionary("penApplicationInteractionModes")[id],
            let explicit = PenApplicationMode(rawValue: raw) { return explicit }
+        if removedLegacyIDs.contains(id) { return Self.defaultMode }
         if longPress.excludes(id) { return .drawing }
-        return navigation.mode(for: id) == .browse ? .browse : .pointer
+        return navigation.configuredMode(for: id).map { $0 == .browse ? .browse : .pointer } ?? Self.defaultMode
     }
+    /// Reports explicit browse records, not whether an unconfigured application can browse.
     public var hasBrowseApplications: Bool { applications.keys.contains { mode(for: $0) == .browse } }
+    /// Adding an existing choice preserves its mode; a new user record starts in browse.
+    @discardableResult public func add(for id: String, name: String) -> PenApplicationProfile? {
+        guard let id = PenApplicationID.normalize(id) else { return nil }
+        let existing = configuredApplications.first { $0.bundleID == id }
+        set(existing?.mode ?? Self.defaultMode, for: id, name: name)
+        return configuredApplications.first { $0.bundleID == id }
+    }
     public func set(_ mode: PenApplicationMode, for id: String, name: String) {
-        guard !id.isEmpty else { return }
-        var modes = defaults.dictionary(forKey: "penApplicationInteractionModes") as? [String: String] ?? [:]
-        modes[id.lowercased()] = mode.rawValue
-        defaults.set(modes, forKey: "penApplicationInteractionModes")
-        var names = defaults.dictionary(forKey: "penApplicationInteractionNames") as? [String: String] ?? [:]
-        names[id.lowercased()] = name
-        defaults.set(names, forKey: "penApplicationInteractionNames")
+        guard let id = PenApplicationID.normalize(id) else { return }
+        replaceRecord("penApplicationInteractionModes", id: id, value: mode.rawValue)
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        replaceRecord("penApplicationInteractionNames", id: id, value: name.isEmpty ? id : name)
+        defaults.set(removedLegacyIDs.subtracting([id]).sorted(), forKey: "penApplicationRemovedLegacyIDs")
+    }
+    public func remove(for id: String) {
+        guard let id = PenApplicationID.normalize(id) else { return }
+        for key in ["penApplicationInteractionModes", "penApplicationInteractionNames",
+                    "penNavigationApplicationModes", "penNavigationApplicationNames"] {
+            replaceRecord(key, id: id, value: nil)
+        }
+        // Do not materialize/remove the built-in Photoshop family rule or unrelated versions.
+        if id != "com.adobe.photoshop", defaults.object(forKey: "penLongPressExcludedApps") != nil {
+            replaceRecord("penLongPressExcludedApps", id: id, value: nil)
+        }
+        // An exact tombstone suppresses inherited drawing rules for this deleted application only.
+        defaults.set(removedLegacyIDs.union([id]).sorted(), forKey: "penApplicationRemovedLegacyIDs")
+    }
+    private func replaceRecord(_ key: String, id: String, value: String?) {
+        var values = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        values = values.filter { PenApplicationID.normalize($0.key) != id }
+        if let value { values[id] = value }
+        defaults.set(values, forKey: key)
     }
 }
 
@@ -94,5 +167,17 @@ public enum PenHitRegion: Equatable {
 public enum UnknownBrowseArea {
     public static func contains(_ point: CGPoint, in bounds: CGRect) -> Bool {
         bounds.contains(point) && point.y >= bounds.minY + 32
+    }
+}
+
+/// Region metadata alone cannot prove that a real, ordinary application window receives the drag.
+public enum PenBrowseRouting {
+    public static func mode(applicationMode: PenApplicationMode, region: PenHitRegion, point: CGPoint,
+                            windowBounds: CGRect?, windowLayer: Int?, ownWindow: Bool,
+                            allowOwnWindow: Bool = false) -> PenNavigationMode {
+        guard applicationMode == .browse, let bounds = windowBounds, windowLayer == 0,
+              bounds.contains(point), !ownWindow || allowOwnWindow else { return .pointer }
+        return region == .content || (region == .unknown && UnknownBrowseArea.contains(point, in: bounds))
+            ? .browse : .pointer
     }
 }

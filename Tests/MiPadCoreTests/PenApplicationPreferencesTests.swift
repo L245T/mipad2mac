@@ -2,6 +2,115 @@ import Foundation
 import Testing
 @testable import MiPadCore
 struct PenApplicationPreferencesTests {
+    @Test func emptyConfigurationBrowsesWithoutListingImplicitDefaults() throws {
+        let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        #expect(profiles.mode(for: "com.example.reader") == .browse)
+        #expect(profiles.mode(for: nil) == .pointer)
+        #expect(profiles.mode(for: " \n ") == .pointer)
+        #expect(profiles.mode(for: "com.adobe.Photoshop.2026") == .drawing)
+        #expect(profiles.configuredApplications.isEmpty)
+        #expect(!profiles.hasBrowseApplications) // input routing must not depend on this list
+        #expect(defaults.object(forKey: "penApplicationInteractionModes") == nil)
+        #expect(defaults.object(forKey: "penLongPressExcludedApps") == nil)
+    }
+    @Test func explicitLegacyChoicesRemainListedAndKeepTheirModes() throws {
+        let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let navigation = PenNavigationPreferences(defaults: defaults)
+        navigation.set(.pointer, for: "com.example.Pointer", name: "Pointer")
+        navigation.set(.browse, for: "com.example.Browser", name: "Browser")
+        LongPressPreferences(defaults: defaults).exclusions = ["com.example.Paint": "Paint"]
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        #expect(profiles.mode(for: "COM.EXAMPLE.POINTER") == .pointer)
+        #expect(profiles.mode(for: "com.example.browser") == .browse)
+        #expect(profiles.mode(for: "com.example.paint") == .drawing)
+        #expect(profiles.configuredApplications.count == 3)
+        #expect(profiles.configuredApplications.first?.bundleID == "com.example.paint")
+        #expect(profiles.mode(for: "com.example.new") == .browse)
+        #expect(profiles.configuredApplications.count == 3)
+    }
+    @Test func manualAdditionPersistsAndDuplicateIDsPreserveChoices() throws {
+        let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        #expect(profiles.add(for: " COM.EXAMPLE.READER \n", name: " Reader ")?.mode == .browse)
+        profiles.set(.pointer, for: "com.example.reader", name: "Reader")
+        #expect(profiles.add(for: "Com.Example.Reader", name: "Reader renamed")?.mode == .pointer)
+        let restored = PenApplicationPreferences(defaults: defaults)
+        #expect(restored.configuredApplications.count == 1)
+        #expect(restored.configuredApplications.first?.name == "Reader renamed")
+        #expect(restored.mode(for: "COM.EXAMPLE.READER") == .pointer)
+        #expect(profiles.add(for: "  ", name: "Invalid") == nil)
+        // Adding a previously implicit application is an explicit new browse choice.
+        #expect(profiles.add(for: "com.adobe.Photoshop.2026", name: "Photoshop 2026")?.mode == .browse)
+        #expect(profiles.mode(for: "com.adobe.Photoshop.2025") == .drawing)
+    }
+    @Test func deletionCleansLegacyRecordsAndKeepsRightClickCompatibility() throws {
+        let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = "com.example.reader"
+        defaults.set([id: "pointer", "COM.EXAMPLE.READER": "browse", "other": "pointer"], forKey: "penNavigationApplicationModes")
+        defaults.set(["Com.Example.Reader": "Reader", "other": "Other"], forKey: "penNavigationApplicationNames")
+        defaults.set(["COM.EXAMPLE.READER": "Reader"], forKey: "penLongPressExcludedApps")
+        defaults.set([id: "browse", "COM.EXAMPLE.READER": "drawing"], forKey: "penApplicationInteractionModes")
+        defaults.set([id: "Reader", "Com.Example.Reader": "Old Reader"], forKey: "penApplicationInteractionNames")
+        let longPress = LongPressPreferences(defaults: defaults)
+        longPress.compatibilityEnabled = true
+        longPress.compatibilityApplications = ["Com.Example.Reader": "Reader"]
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        #expect(profiles.mode(for: id) == .browse) // canonical duplicate wins deterministically
+        profiles.remove(for: " COM.EXAMPLE.READER ")
+        let restored = PenApplicationPreferences(defaults: defaults)
+        #expect(restored.mode(for: id) == .browse)
+        #expect(restored.applications[id] == nil)
+        #expect(restored.mode(for: "other") == .pointer)
+        #expect(restored.applications["other"] == "Other")
+        for key in ["penNavigationApplicationModes", "penNavigationApplicationNames", "penLongPressExcludedApps",
+                    "penApplicationInteractionModes", "penApplicationInteractionNames"] {
+            let values = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+            #expect(!values.keys.contains { $0.lowercased() == id })
+        }
+        #expect(longPress.compatibilityEnabled)
+        #expect(longPress.compatibilityApplications == ["Com.Example.Reader": "Reader"])
+        #expect(restored.add(for: id, name: "Reader")?.mode == .browse)
+        #expect(restored.applications[id] == "Reader")
+        #expect(defaults.stringArray(forKey: "penApplicationRemovedLegacyIDs")?.contains(id) == false)
+    }
+    @Test func deletedDrawingVersionDoesNotReturnOrChangeOtherVersions() throws {
+        let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        profiles.set(.drawing, for: "com.adobe.Photoshop.2026", name: "Photoshop 2026")
+        profiles.remove(for: "com.adobe.Photoshop.2026")
+        #expect(PenApplicationPreferences(defaults: defaults).mode(for: "com.adobe.Photoshop.2026") == .browse)
+        #expect(profiles.mode(for: "com.adobe.Photoshop.2025") == .drawing)
+        #expect(profiles.configuredApplications.isEmpty)
+        #expect(defaults.object(forKey: "penLongPressExcludedApps") == nil)
+        // A stored family exclusion remains effective for siblings even when its own row is removed.
+        LongPressPreferences(defaults: defaults).exclusions = ["com.adobe.Photoshop": "Photoshop"]
+        #expect(profiles.configuredApplications.count == 1)
+        profiles.remove(for: "com.adobe.Photoshop")
+        #expect(profiles.mode(for: "com.adobe.Photoshop") == .browse)
+        #expect(profiles.mode(for: "com.adobe.Photoshop.2025") == .drawing)
+        #expect(PenApplicationPreferences(defaults: defaults).configuredApplications.isEmpty)
+        profiles.set(.drawing, for: "com.adobe.Photoshop.2026", name: "Photoshop 2026")
+        #expect(profiles.mode(for: "com.adobe.Photoshop.2026") == .drawing)
+        #expect(profiles.configuredApplications.count == 1)
+    }
+    @Test func storedModesWithoutNamesRemainVisibleAndDrawingSortsFirst() throws {
+        let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["com.example.missing": "pointer"], forKey: "penNavigationApplicationModes")
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        profiles.set(.browse, for: "com.example.b", name: "B")
+        profiles.set(.pointer, for: "com.example.a", name: "A")
+        profiles.set(.drawing, for: "com.example.z", name: "Z")
+        #expect(profiles.configuredApplications.map(\.bundleID) == ["com.example.z", "com.example.a", "com.example.b", "com.example.missing"])
+        #expect(profiles.applications["com.example.missing"] == "com.example.missing")
+        #expect(profiles.mode(for: "com.example.missing") == .pointer)
+    }
     @Test func legacyProfilesRemainUsableAndExplicitModeResolvesConflict() throws {
         let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -66,6 +175,33 @@ struct PenApplicationPreferencesTests {
         #expect(UnknownBrowseArea.contains(CGPoint(x: -600, y: -468), in: bounds))
         #expect(!UnknownBrowseArea.contains(CGPoint(x: 0, y: 0), in: bounds))
         #expect(!UnknownBrowseArea.contains(.zero, in: .zero))
+    }
+    @Test func defaultBrowseRequiresARealOrdinaryWindowAndPreservesControls() {
+        let point = CGPoint(x: 100, y: 100), bounds = CGRect(x: 0, y: 0, width: 800, height: 600)
+        for region in [PenHitRegion.content, .unknown] {
+            #expect(PenBrowseRouting.mode(applicationMode: .browse, region: region, point: point,
+                windowBounds: bounds, windowLayer: 0, ownWindow: false) == .browse)
+            for layer in [Int?.none, -1, 3, 25] {
+                #expect(PenBrowseRouting.mode(applicationMode: .browse, region: region, point: point,
+                    windowBounds: bounds, windowLayer: layer, ownWindow: false) == .pointer)
+            }
+            #expect(PenBrowseRouting.mode(applicationMode: .browse, region: region, point: point,
+                windowBounds: nil, windowLayer: 0, ownWindow: false) == .pointer)
+            #expect(PenBrowseRouting.mode(applicationMode: .browse, region: region, point: point,
+                windowBounds: bounds, windowLayer: 0, ownWindow: true) == .pointer)
+        }
+        #expect(PenBrowseRouting.mode(applicationMode: .browse, region: .content, point: point,
+            windowBounds: bounds, windowLayer: 0, ownWindow: true, allowOwnWindow: true) == .browse)
+        #expect(PenBrowseRouting.mode(applicationMode: .browse, region: .unknown, point: CGPoint(x: 100, y: 20),
+            windowBounds: bounds, windowLayer: 0, ownWindow: false) == .pointer)
+        #expect(PenBrowseRouting.mode(applicationMode: .browse, region: .chrome, point: point,
+            windowBounds: bounds, windowLayer: 0, ownWindow: false) == .pointer)
+        for mode in [PenApplicationMode.pointer, .drawing] {
+            #expect(PenBrowseRouting.mode(applicationMode: mode, region: .content, point: point,
+                windowBounds: bounds, windowLayer: 0, ownWindow: false) == .pointer)
+        }
+        #expect(PenBrowseRouting.mode(applicationMode: .browse, region: .content, point: CGPoint(x: -1, y: 100),
+            windowBounds: bounds, windowLayer: 0, ownWindow: false) == .pointer)
     }
 
 }

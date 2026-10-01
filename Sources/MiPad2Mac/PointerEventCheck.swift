@@ -29,6 +29,10 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private var diagnosticMessages: [String] = []
     private var fallbackFrame = NSRect.zero
     private var hitUnavailable = false
+    private var windowUnavailable = false
+    private var profileScrollBefore = 0
+    private var profileDownBefore = 0
+    private var profileUpBefore = 0
     private var momentumBefore = 0
     private var coastCursor = CGPoint.zero
 
@@ -36,12 +40,12 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         originalCursor = CGEvent(source: nil)?.location ?? .zero
         defaults = UserDefaults(suiteName: suite)!
         output = PointerOutput(defaults: defaults, observeApplications: false, diagnosticOwnWindow: true,
-                               diagnosticHitUnavailable: { [weak self] in self?.hitUnavailable ?? false })
+                               diagnosticHitUnavailable: { [weak self] in self?.hitUnavailable ?? false },
+                               diagnosticWindowUnavailable: { [weak self] in self?.windowUnavailable ?? false })
         output.momentumEnabled = false
         output.longPress.enabled = false
         output.tabletEnabled = true
         let id = Bundle.main.bundleIdentifier ?? "org.mipad2mac.app"
-        output.navigation.set(.browse, for: id, name: "本地事件验收")
         window = EventCheckWindow(contentRect: view.bounds, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "MiPad2Mac 本地事件验收"; window.contentView = view
         view.setAccessibilityElement(true); view.setAccessibilityRole(.scrollArea)
@@ -63,7 +67,10 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             print(message)
             if self?.diagnosticMessages.count ?? 200 < 200 { self?.diagnosticMessages.append(message) }
         }
-        append { self.pen() }
+        append {
+            self.check(self.output.configuredProfiles.isEmpty, "零应用配置不自动登记当前窗口或内置绘画例外")
+            self.pen()
+        }
         append(after: 0.04) { self.pen(0.5, 0.6) }
         append(after: 0.04) { self.pen(0.5, 0.7) }
         append(after: 0.08) {
@@ -429,7 +436,11 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: 0.08) {
             let axes = Array(self.view.receivedMomentumAxes.dropFirst(self.momentumBefore))
             self.check(self.output.momentumActive && axes.contains { $0.x != 0 } && axes.allSatisfy { $0.y == 0 }, "横向惯性只沿原横向滚动")
-            self.output.release(); self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count
+            self.output.release()
+        }
+        // Drain previously submitted horizontal momentum before counting a stopped vertical contact.
+        append(after: 0.05) {
+            self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count
             self.pen()
         }
         append(after: 0.03) { self.pen(0.5, 0.65) }
@@ -438,6 +449,71 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: 0.01) { self.pen(down: false) }
         append(after: 0.08) {
             self.check(!self.output.momentumActive && self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore, "停稳后抬笔不产生惯性")
+            self.output.momentumEnabled = false; self.output.longPress.enabled = false
+            self.output.removeApplicationProfile(bundleID: id)
+            self.hitUnavailable = true
+            self.check(self.output.configuredProfiles.isEmpty && self.output.applicationProfiles.mode(for: id) == .browse,
+                       "删除新旧记录后回到默认浏览且不复活列表")
+            self.fallbackScrollBefore = self.view.bridgeScrolls; self.profileDownBefore = self.output.downCount
+            self.pen(); self.pen(0.5, 0.6)
+        }
+        append {
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore && self.output.downCount == self.profileDownBefore,
+                       "空配置且长按关闭时未知普通窗口仍收到滚动而不选字")
+            self.output.setApplicationProfileMode(.pointer, for: id, name: "本地事件验收")
+            self.profileScrollBefore = self.output.scrollEventCount
+            self.pen(0.5, 0.7)
+            self.check(self.output.scrollEventCount == self.profileScrollBefore && self.output.downCount == self.profileDownBefore,
+                       "滚动中修改模式安全释放，同次接触不变成左键拖动")
+            self.pen(down: false)
+            self.pen(); self.pen(0.55, 0.55)
+        }
+        append {
+            self.check(self.output.downCount == self.profileDownBefore + 1,
+                       "模式切换后新接触采用显式指针")
+            self.profileUpBefore = self.output.upCount
+            self.output.removeApplicationProfile(bundleID: id)
+            self.check(self.output.upCount == self.profileUpBefore + 1, "指针接触期间删除配置实际释放左键")
+            self.profileDownBefore = self.output.downCount; self.profileScrollBefore = self.output.scrollEventCount
+            self.pen(0.6, 0.6); self.pen(down: false)
+            self.check(self.output.downCount == self.profileDownBefore && self.output.scrollEventCount == self.profileScrollBefore,
+                       "删除配置后的剩余接触不混发点击或滚动")
+            self.hitUnavailable = false; self.windowUnavailable = true
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.pen(); self.pen(0.55, 0.55); self.pen(down: false)
+        }
+        append {
+            self.check(self.output.downCount == self.profileDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore,
+                       "即使AX命中内容，无普通窗口身份也不会误启默认滚动")
+            self.windowUnavailable = false; self.hitUnavailable = true
+            self.output.selectProfile("com.example.menu-context")
+            self.output.setApplicationProfileMode(.drawing, for: id, name: "本地事件验收")
+            self.check(self.output.profileID == "com.example.menu-context" && self.output.configuredProfiles.first?.mode == .drawing,
+                       "逐行设置模式不覆盖当前应用或HID菜单上下文")
+            self.output.addApplicationProfile(bundleID: id.uppercased(), name: "本地事件验收")
+            self.check(self.output.configuredProfiles.count == 1 && self.output.configuredProfiles.first?.mode == .drawing,
+                       "重复添加应用保留绘画选择并按ID去重")
+            self.output.removeApplicationProfile(bundleID: id)
+            self.check(self.output.profileID == "com.example.menu-context" && self.output.configuredProfiles.isEmpty,
+                       "删除另一行不改变当前应用上下文或自动登记该应用")
+            self.output.removeApplicationProfile(bundleID: "com.example.menu-context")
+            self.check(self.output.selectedProfileID == nil, "删除旧选择记录清除失效上下文")
+            self.output.addApplicationProfile(bundleID: id, name: "本地事件验收")
+            self.output.momentumEnabled = true
+            self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.55) }
+        append(after: 0.03) { self.pen(0.5, 0.68) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.08) {
+            self.check(self.output.momentumActive, "配置删除验收前已进入惯性滚动")
+            self.output.removeApplicationProfile(bundleID: id)
+            self.check(!self.output.momentumActive, "删除应用配置同步停止惯性提交")
+        }
+        append(after: 0.05) { self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count }
+        append(after: 0.1) {
+            self.check(self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore,
+                       "删除配置后系统队列排空，无继续到达的惯性帧")
             self.finish()
         }
         runNext()

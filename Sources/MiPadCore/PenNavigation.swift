@@ -16,17 +16,23 @@ public final class PenNavigationPreferences {
         (defaults.dictionary(forKey: "penNavigationApplicationModes") as? [String: String] ?? [:]).values.contains(PenNavigationMode.browse.rawValue)
     }
     public func mode(for bundleID: String?, excluded: Bool = false) -> PenNavigationMode {
-        guard !excluded, let bundleID, !bundleID.isEmpty,
+        guard !excluded, let bundleID = PenApplicationID.normalize(bundleID) else { return .pointer }
+        return configuredMode(for: bundleID) ?? .browse
+    }
+    /// Distinguishes a stored pointer choice from the default for a previously unknown application.
+    public func configuredMode(for bundleID: String) -> PenNavigationMode? {
+        guard let id = PenApplicationID.normalize(bundleID),
               let modes = defaults.dictionary(forKey: "penNavigationApplicationModes") as? [String: String],
-              let value = modes[bundleID.lowercased()], let mode = PenNavigationMode(rawValue: value) else { return .pointer }
-        return mode
+              let value = PenApplicationID.dictionary(modes)[id] else { return nil }
+        return PenNavigationMode(rawValue: value)
     }
     public func set(_ mode: PenNavigationMode, for bundleID: String, name: String) {
-        guard !bundleID.isEmpty else { return }
+        guard let bundleID = PenApplicationID.normalize(bundleID) else { return }
         var modes = defaults.dictionary(forKey: "penNavigationApplicationModes") as? [String: String] ?? [:]
-        modes[bundleID.lowercased()] = mode.rawValue
+        modes = modes.filter { PenApplicationID.normalize($0.key) != bundleID }
+        modes[bundleID] = mode.rawValue
         defaults.set(modes, forKey: "penNavigationApplicationModes")
-        var names = applications; names[bundleID] = name
+        var names = applications.filter { PenApplicationID.normalize($0.key) != bundleID }; names[bundleID] = name
         defaults.set(names, forKey: "penNavigationApplicationNames")
     }
 }
