@@ -35,6 +35,13 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private var profileUpBefore = 0
     private var momentumBefore = 0
     private var coastCursor = CGPoint.zero
+    private let buttonA = NSButton(frame: NSRect(x: 200, y: 210, width: 22, height: 22))
+    private let buttonB = NSButton(frame: NSRect(x: 252, y: 210, width: 22, height: 22))
+    private var buttonActions = 0
+    private var buttonBefore = 0
+    private var buttonDownBefore = 0
+    private var buttonUpBefore = 0
+    private var buttonOverlay: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         originalCursor = CGEvent(source: nil)?.location ?? .zero
@@ -68,6 +75,11 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             if self?.diagnosticMessages.count ?? 200 < 200 { self?.diagnosticMessages.append(message) }
         }
         // The native show animation briefly changes WindowServer bounds; start after it settles.
+        if CommandLine.arguments.contains("--button-target-check-only") {
+            append(after: 0.6) { self.output.removeApplicationProfile(bundleID: "com.adobe.photoshop") }
+            appendButtonChecks(id: id, cadence: max(0.01, min(0.1, NSEvent.doubleClickInterval / 4)))
+            runNext(); return
+        }
         append(after: 0.6) {
             self.check(self.output.configuredProfiles.map(\.bundleID) == ["com.adobe.photoshop"], "初始列表只含可见Photoshop家族兼容例外")
             self.output.removeApplicationProfile(bundleID: "com.adobe.photoshop")
@@ -634,9 +646,127 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: 0.08) {
             self.check(self.output.downCount == self.profileDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore,
                        "应用自己的普通画布窗口继续即时绘画")
+        }
+        appendButtonChecks(id: id, cadence: cadence)
+        runNext()
+    }
+    @objc private func buttonActivated(_ sender: NSButton) { buttonActions += sender === buttonA ? 1 : 100 }
+    /// Actual NSButton tracking/action and WindowServer delivery; never an AXPress invocation.
+    private func appendButtonChecks(id: String, cadence: Double) {
+        append {
+            self.output.release(); self.output.setApplicationProfileMode(.pointer, for: id, name: "本地事件验收")
+            self.output.tabletEnabled = false; self.output.longPress.enabled = false
+            self.output.longPress.compatibilityEnabled = false
+            self.output.changeButtonRadius(6)
+            self.view.subviews.forEach { $0.removeFromSuperview() }
+            self.view.setAccessibilityRole(.group)
+            // Restore ordinary native hit testing; the earlier scroll fixture deliberately exposes itself as one AX leaf.
+            self.view.setAccessibilityElement(false)
+            for button in [self.buttonA, self.buttonB] {
+                button.title = "·"; button.bezelStyle = .smallSquare
+                button.target = self; button.action = #selector(self.buttonActivated(_:))
+                self.view.addSubview(button)
+            }
+            self.view.setAccessibilityChildren([self.buttonA, self.buttonB])
+        }
+        append {
+            self.buttonDownBefore = self.output.downCount
+            self.buttonPen(); self.buttonPen(down: false)
+        }
+        append(after: cadence) {
+            self.check(self.buttonActions == 1, "附近点按实际触发最近的原生小按钮")
+            self.check(self.output.downCount == self.buttonDownBefore + 1, "辅助点按只有一组左键")
+            self.buttonPen(); self.buttonPen(down: false)
+        }
+        append(after: cadence) { self.buttonPen(); self.buttonPen(down: false) }
+        append(after: cadence) {
+            self.check(self.buttonActions == 3, "原生按钮接收三次辅助点击")
+            self.check(Array(self.window.receivedDownClickCounts.suffix(3)) == [1, 2, 3], "辅助点击保留真实单／双／三击计数")
+            self.output.changeButtonRadius(18); self.buttonBefore = self.buttonActions
+            self.buttonPen(x: 237); self.buttonPen(x: 237, down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "两按钮等距时不按遍历顺序误选")
+            self.output.changeButtonRadius(0); self.buttonBefore = self.buttonActions
+            self.buttonPen(); self.buttonPen(down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "0关闭后范围外点按没有按钮动作")
+            self.output.changeButtonRadius(6); self.buttonA.isEnabled = false
+            self.buttonPen(); self.buttonPen(down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "禁用按钮不会被辅助触发")
+            self.buttonA.isEnabled = true
+            self.output.release(); self.buttonPen()
+            self.buttonA.setFrameOrigin(NSPoint(x: 340, y: 210))
+            self.buttonPen(down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "落笔后按钮移动时不点击旧按钮目标")
+            self.buttonA.setFrameOrigin(NSPoint(x: 200, y: 210))
+            self.output.release(); self.buttonDownBefore = self.output.downCount
+            self.buttonPen()
+            let desktop = self.window.convertPoint(toScreen: self.view.convert(NSPoint(x: 226, y: 221), to: nil))
+            let overlay = NSWindow(contentRect: NSRect(x: desktop.x - 15, y: desktop.y - 15, width: 30, height: 30),
+                styleMask: [.borderless], backing: .buffered, defer: false)
+            overlay.isReleasedWhenClosed = false; overlay.backgroundColor = .windowBackgroundColor
+            overlay.orderFront(nil); self.buttonOverlay = overlay
+        }
+        append(after: 0.08) { self.buttonPen(down: false) }
+        append(after: 0.08) {
+            self.check(self.output.downCount == self.buttonDownBefore, "落笔后遮挡原窗口时取消辅助点击")
+            self.buttonOverlay?.orderOut(nil); self.buttonOverlay = nil
+            self.output.release(); self.output.setApplicationProfileMode(.drawing, for: id, name: "本地事件验收")
+            self.buttonDownBefore = self.output.downCount; self.buttonPen()
+            self.check(self.output.downCount == self.buttonDownBefore + 1, "绘画近按钮落笔仍即时按下")
+            self.buttonPen(down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "绘画模式不吸附邻近按钮")
+            self.output.setApplicationProfileMode(.pointer, for: id, name: "本地事件验收")
+            self.buttonDownBefore = self.output.downCount; self.buttonPen()
+            self.check(self.output.downCount == self.buttonDownBefore, "关闭长按仍能只延迟近按钮短点按")
+            self.buttonPen(x: 236)
+            self.check(self.output.downCount == self.buttonDownBefore + 1, "近按钮开始拖动后按原起点发送左键")
+            self.buttonPen(x: 236, down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "近按钮拖动没有额外按钮点击")
+            self.output.setApplicationProfileMode(.browse, for: id, name: "本地事件验收")
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.buttonPen(); self.buttonPen(x: 246); self.buttonPen(x: 246, down: false)
+        }
+        append {
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore && self.buttonActions == self.buttonBefore,
+                       "近按钮浏览滑动仍滚动，不转为辅助点击")
+            self.output.release(); self.output.longPress.enabled = true
+            self.output.longPress.delay = 0.3; self.fallbackRightBefore = self.output.rightClickCount
+            self.buttonPen()
+        }
+        append(after: 0.4) { self.buttonPen(down: false) }
+        append {
+            self.check(self.output.rightClickCount == self.fallbackRightBefore + 1 && self.buttonActions == self.buttonBefore,
+                       "近按钮长按发送原位置右键，不辅助左键")
+            self.output.longPress.enabled = false
+            self.output.setApplicationProfileMode(.pointer, for: id, name: "本地事件验收")
+            var extra: [NSButton] = []
+            for index in 0..<50 {
+                let button = NSButton(frame: NSRect(x: 30 + index * 4, y: 50, width: 20, height: 20))
+                button.title = "·"; self.view.addSubview(button); extra.append(button)
+            }
+            self.view.setAccessibilityChildren([self.buttonA, self.buttonB] + extra)
+            self.output.release(); self.buttonPen(); self.buttonPen(down: false)
+        }
+        append {
+            self.check(self.buttonActions == self.buttonBefore, "候选树超过预算时保留原始点按")
             self.finish()
         }
-        runNext()
+    }
+    private func buttonPen(x: Double = 226, down: Bool = true) {
+        let desktop = window.convertPoint(toScreen: view.convert(NSPoint(x: x, y: 221), to: nil))
+        let top = NSScreen.screens.first!.frame.maxY, bounds = output.mapping.bounds
+        pen((desktop.x - bounds.minX) / (bounds.width - 1), (top - desktop.y - bounds.minY) / (bounds.height - 1), down: down)
     }
     private func titlePen(offset: CGFloat = 0, down: Bool = true) {
         let desktop = NSPoint(x: originalFrame.midX + offset, y: originalFrame.maxY - 10)

@@ -44,6 +44,7 @@ final class SettingsPresentation: ObservableObject {
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
             String(app.enabled), String(app.output.tabletEnabled), String(app.output.momentumEnabled), String(app.monitoring),
+            String(app.output.buttonPreferences.radius),
             app.output.defaultApplicationMode.rawValue,
             app.output.configuredProfiles.map { "\($0.bundleID):\($0.name):\($0.mode.rawValue)" }.joined(separator: "|"),
             app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
@@ -196,6 +197,19 @@ struct SettingsDetail: View {
                     ExplanationButton(text: "仅用于浏览模式的滚动，对所有应用生效，默认开启并自动保存。\n\n快速滑动后抬笔，内容沿原方向继续滚动并逐渐停止。延续距离主要取决于速度，笔压仅小幅调整距离，不用于切换模式。\n\n停稳后抬笔不继续滚动；再次落笔、切换应用、目标失效或释放控制时停止。横向与纵向使用同一设置，不影响点击、拖选或绘画。", label: "惯性滚动说明")
                 }
                 settingDescription("浏览时抬笔继续滚动；停稳不续滚，再次落笔立即停止。")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("笔尖模糊触控")
+                        Spacer()
+                        Text(app.output.buttonPreferences.radius == 0 ? "关闭" : "\(Int(app.output.buttonPreferences.radius))点")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                        ExplanationButton(text: "点按小按钮附近时，尝试点击范围内最近的可用按钮。范围按按钮边缘计算，单位为屏幕逻辑点；默认6点，0关闭。\n\n仅对能完整核对按钮信息的普通窗口生效。复杂网页或自绘界面可能无法识别；候选相近、查询不完整或按钮被遮挡时保留原始点按。\n\n文字和已命中的控件不会被吸附，窗口顶栏、绘画、拖动、滚动和长按右键不使用此范围。设置自动保存，与长按和双击防抖分别设置；调整后抬笔重新落下。", label: "笔尖模糊触控说明")
+                    }
+                    SettingsIntegerSlider(value: Binding(get: { app.output.buttonPreferences.radius }, set: { value in
+                        model.act { app.output.changeButtonRadius(value) }
+                    }), label: "笔尖模糊触控", distanceTicks: true)
+                    settingDescription("尝试点中附近的小按钮；0关闭，无法可靠识别时保留原始点击。")
+                }
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
                         Text("双击与三击防抖")

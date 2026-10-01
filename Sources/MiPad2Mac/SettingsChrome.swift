@@ -305,6 +305,7 @@ struct SettingsScrollTrack: NSViewRepresentable {
 struct SettingsIntegerSlider: View {
     @Binding var value: Double
     var label = "长按防抖"
+    var distanceTicks = false
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
         VStack(spacing: 4) {
@@ -336,7 +337,9 @@ struct SettingsIntegerSlider: View {
         GeometryReader { geometry in
             ForEach(0...18, id: \.self) { index in
                 Group {
-                    if let landmark = LongPressJitterFilter.landmarks.first(where: { $0.tolerance == Double(index) }) {
+                    if distanceTicks, [0, 6, 12, 18].contains(index) {
+                        Text(index == 0 ? "关闭" : "\(index)点").font(.caption).fixedSize()
+                    } else if !distanceTicks, let landmark = LongPressJitterFilter.landmarks.first(where: { $0.tolerance == Double(index) }) {
                         Text(landmark.title).font(.caption).fixedSize()
                     } else {
                         Circle().frame(width: 2, height: 2)

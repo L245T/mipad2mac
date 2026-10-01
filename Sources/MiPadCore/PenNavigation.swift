@@ -53,7 +53,9 @@ public struct PenScrollEvent: Equatable {
 public struct PenGestureEvents {
     public var pointer: [PointerEvent]
     public var scroll: [PenScrollEvent]
-    public init(pointer: [PointerEvent] = [], scroll: [PenScrollEvent] = []) {
-        self.pointer = pointer; self.scroll = scroll
+    /// Only an uncancelled pending contact lifted before any drag/scroll/right click.
+    public var completedTap: Bool
+    public init(pointer: [PointerEvent] = [], scroll: [PenScrollEvent] = [], completedTap: Bool = false) {
+        self.pointer = pointer; self.scroll = scroll; self.completedTap = completedTap
     }
 }

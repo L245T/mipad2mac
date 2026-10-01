@@ -78,7 +78,8 @@ public struct LongPressGesture {
     public mutating func consumeNavigation(_ sample: Sample, mapping: Mapping, now: TimeInterval,
                                  enabled: Bool, delay: TimeInterval, drawing: Bool,
                                  jitterFilter: LongPressJitterFilter = .medium,
-                                 navigation: PenNavigationMode = .pointer) -> PenGestureEvents {
+                                 navigation: PenNavigationMode = .pointer,
+                                 deferButtonTap: Bool = false) -> PenGestureEvents {
         let contact = sample.touching && sample.inRange && !sample.eraser
         if phase == .completed {
             // The context menu owns subsequent motion. Never click or drag again until a new contact.
@@ -106,11 +107,12 @@ public struct LongPressGesture {
                 return PenGestureEvents(pointer: sample.positionValid ? [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))] : [])
             }
             navigationMode = navigation
-            if !enabled && navigation == .pointer {
+            if !enabled && !deferButtonTap && navigation == .pointer {
                 phase = .direct
                 return PenGestureEvents(pointer: direct.consume(sample, mapping: mapping, drawing: drawing).map { [$0] } ?? [])
             }
-            self.jitterFilter = jitterFilter
+            // A click-only delay must retain the direct pointer's original 4-point drag threshold.
+            self.jitterFilter = enabled ? jitterFilter : LongPressJitterFilter(tolerance: 4)
             origin = mapping.point(x: sample.x, y: sample.y); last = origin
             phase = .pending
             deadline = enabled ? now + LongPressPreferences.validDelay(delay) : nil
@@ -124,7 +126,7 @@ public struct LongPressGesture {
             let wasPending = phase == .pending
             phase = .idle; deadline = nil
             return PenGestureEvents(pointer: wasPending ? [PointerEvent(action: .down, point: origin), PointerEvent(action: .up, point: origin)]
-                : [PointerEvent(action: .up, point: last)])
+                : [PointerEvent(action: .up, point: last)], completedTap: wasPending)
         }
         let point = mapping.point(x: sample.x, y: sample.y)
         if phase == .scrolling {

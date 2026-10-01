@@ -18,6 +18,17 @@ final class PointerOutput {
     let navigation: PenNavigationPreferences
     let applicationProfiles: PenApplicationPreferences
     let clickPreferences: ClickPreferences
+    let buttonPreferences: ButtonTargetTolerancePreferences
+    private let buttonResolver = ButtonTargetResolver()
+    private var buttonTarget: ButtonTargetResolver.Target?
+    private struct ButtonIdentity {
+        let element: AXUIElement
+        let windowID: CGWindowID
+        func matches(_ other: Self) -> Bool { windowID == other.windowID && CFEqual(element, other.element) }
+    }
+    private var contactButtonIdentity: ButtonIdentity?
+    private var previousClickButton: ButtonIdentity?
+    private var activeClickButton: ButtonIdentity?
     private var lastExternalApplication: NSRunningApplication?
     var selectedProfileID: String?
     private var selectedProfileName: String?
@@ -135,6 +146,7 @@ final class PointerOutput {
         navigation = PenNavigationPreferences(defaults: defaults)
         applicationProfiles = PenApplicationPreferences(defaults: defaults)
         clickPreferences = ClickPreferences(defaults: defaults)
+        buttonPreferences = ButtonTargetTolerancePreferences(defaults: defaults)
         guard observeApplications else { return }
         if let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier {
             lastExternalApplication = app
@@ -169,6 +181,8 @@ final class PointerOutput {
         let nodes: [PenHitNode]
         let endReason: String
         let panels: [PenPanelMetadata]
+        let windowElement: AXUIElement?
+        let buttonElement: AXUIElement?
     }
     /// AppKit mouse-down hit testing skips transparent/ignoresMouseEvents overlays.
     private struct ScrollWindow {
@@ -191,12 +205,13 @@ final class PointerOutput {
         return ScrollWindow(id: id, app: app, bounds: bounds,
                             layer: (item[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1)
     }
-    private func target(at point: CGPoint) -> PenTarget? {
+    private func target(at point: CGPoint, deadline suppliedDeadline: TimeInterval? = nil) -> PenTarget? {
         if diagnosticHitUnavailable() { return nil }
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.1
+        let deadline = suppliedDeadline ?? ProcessInfo.processInfo.systemUptime + 0.1
         var element: AXUIElement?
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.05)
+        guard deadline > ProcessInfo.processInfo.systemUptime else { return nil }
+        AXUIElementSetMessagingTimeout(system, Float(min(0.05, deadline - ProcessInfo.processInfo.systemUptime)))
         let result = AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element)
         guard result == .success, let element else {
             longPressDiagnostic("长按目标识别失败：AX \(result.rawValue)")
@@ -213,6 +228,8 @@ final class PointerOutput {
         var nodes: [PenHitNode] = []
         var panels: [PenPanelMetadata] = []
         var ancestor = element
+        var windowElement: AXUIElement?
+        var buttonElement: AXUIElement?
         var endReason = "层数上限"
         for _ in 0..<32 {
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
@@ -235,6 +252,7 @@ final class PointerOutput {
                 }
             }
             nodes.append(PenHitNode(role: role, valueEditable: editable))
+            if role == kAXButtonRole, buttonElement == nil { buttonElement = ancestor }
             if role == kAXWindowRole || role == kAXSheetRole {
                 func metadata(_ key: String) -> CFTypeRef? {
                     let left = deadline - ProcessInfo.processInfo.systemUptime
@@ -264,7 +282,7 @@ final class PointerOutput {
                     }
                 }
             }
-            if role == kAXWindowRole { endReason = "到达窗口"; break }
+            if role == kAXWindowRole { windowElement = ancestor; endReason = "到达窗口"; break }
             let parentRemaining = deadline - ProcessInfo.processInfo.systemUptime
             guard parentRemaining > 0 else { endReason = "查询超时"; break }
             AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, parentRemaining)))
@@ -274,7 +292,8 @@ final class PointerOutput {
             }
             ancestor = unsafeBitCast(value, to: AXUIElement.self)
         }
-        return PenTarget(app: app, region: PenHitRegion.classify(nodes: nodes), nodes: nodes, endReason: endReason, panels: panels)
+        return PenTarget(app: app, region: PenHitRegion.classify(nodes: nodes), nodes: nodes, endReason: endReason,
+                         panels: panels, windowElement: windowElement, buttonElement: buttonElement)
     }
 
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
@@ -282,6 +301,9 @@ final class PointerOutput {
     }
     func changeClickTolerance(_ value: Double) {
         release(); clickPreferences.jitterTolerance = value
+    }
+    func changeButtonRadius(_ value: Double) {
+        release(); buttonPreferences.radius = value
     }
     func addCompatibilityApplication() {
         release()
@@ -324,13 +346,19 @@ final class PointerOutput {
     private func emit(_ events: [PointerEvent]) {
         for planned in events {
             if planned.action == .down {
-                clickCount = clicks.begin(at: planned.point, now: contactStarted, interval: NSEvent.doubleClickInterval,
+                // Hit assistance changes output coordinates only, never physical click grouping.
+                clickCount = clicks.begin(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval,
                                           extraTolerance: contactClickTolerance)
+                activeClickButton = contactButtonIdentity
             }
-            if planned.action == .drag { clicks.drag(to: planned.point) }
-            if planned.action == .rightDown { clicks.reset() }
+            if planned.action == .drag { clicks.drag(to: planned.point); activeClickButton = nil }
+            if planned.action == .rightDown {
+                clicks.reset(); buttonTarget = nil; contactButtonIdentity = nil
+                activeClickButton = nil; previousClickButton = nil
+            }
             if !send(planned.action, at: planned.point) {
                 clicks.reset()
+                buttonTarget = nil; contactButtonIdentity = nil; activeClickButton = nil; previousClickButton = nil
                 // Release only buttons we actually submitted and suppress this contact after a failed post setup.
                 let cancelled = gesture.cancelNavigation()
                 emitScroll(cancelled.scroll)
@@ -359,9 +387,11 @@ final class PointerOutput {
             stopMomentum()
             contactStarted = now
             pressLocation = mapping.point(x: sample.x, y: sample.y)
+            buttonTarget = nil; contactButtonIdentity = nil
             let frontmost = NSWorkspace.shared.frontmostApplication
             // Default browse needs region/window lookup even with an empty saved-app list or long press off.
-            let hit = target(at: pressLocation)
+            let targetDeadline = now + 0.1
+            let hit = target(at: pressLocation, deadline: targetDeadline)
             let topWindow = window(at: pressLocation)
             let matchingHit = topWindow == nil || hit?.app?.processIdentifier == topWindow?.app.processIdentifier ? hit : nil
             let resolvedApp = topWindow?.app ?? matchingHit?.app
@@ -377,6 +407,27 @@ final class PointerOutput {
                 context = filePanel ? .systemFilePanel : .ordinaryApplication(bundleID: id)
             }
             let appMode = applicationProfiles.mode(for: context)
+            if appMode != .drawing, ordinaryWindow, buttonPreferences.radius > 0,
+               let matchingHit, let topWindow, let axWindow = matchingHit.windowElement,
+               matchingHit.app?.processIdentifier == topWindow.app.processIdentifier {
+                if let button = matchingHit.buttonElement {
+                    contactButtonIdentity = ButtonIdentity(element: button, windowID: topWindow.id)
+                } else if ButtonTargetGeometry.permitsMiss(roles: matchingHit.nodes.map { $0.role }) {
+                    buttonTarget = buttonResolver.resolve(point: pressLocation, radius: buttonPreferences.radius,
+                        window: axWindow, windowID: topWindow.id, processID: topWindow.app.processIdentifier,
+                        windowBounds: topWindow.bounds, deadline: min(targetDeadline, ProcessInfo.processInfo.systemUptime + 0.02))
+                    if let buttonTarget {
+                        contactButtonIdentity = ButtonIdentity(element: buttonTarget.element, windowID: topWindow.id)
+                        longPressDiagnostic("笔尖模糊触控：已找到近按钮，等待短点按完成后核对")
+                    }
+                }
+            }
+            // Adjacent controls cannot become a double click just because snapped coordinates are close.
+            if previousClickButton != nil || contactButtonIdentity != nil {
+                if !(previousClickButton.flatMap { previous in contactButtonIdentity.map { previous.matches($0) } } ?? false) {
+                    clicks.reset(); previousClickButton = nil
+                }
+            }
             if filePanel { longPressDiagnostic("系统文件窗格采用默认\(appMode.title)；应用绘画例外不作用于此窗格") }
             let unknown = matchingHit?.region == nil || matchingHit?.region == .unknown
             contactMode = PenBrowseRouting.mode(applicationMode: appMode, region: matchingHit?.region ?? .unknown,
@@ -391,7 +442,7 @@ final class PointerOutput {
             candidateTarget = fallbackContact ? topWindow?.app.processIdentifier : targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
             // Second/third held taps retain selection, including unknown custom content.
-            let multiTapSelection = contactMode == .browse
+            let multiTapSelection = contactMode == .browse && buttonTarget == nil
                 && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval,
                                    extraTolerance: contactClickTolerance) > 1
             if multiTapSelection { contactMode = .pointer }
@@ -426,8 +477,31 @@ final class PointerOutput {
         let wasPending = gesture.isPending
         let result = gesture.consumeNavigation(sample, mapping: mapping, now: now,
                                      enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled,
-                                     jitterFilter: longPress.jitterFilter, navigation: contactMode)
-        let events = result.pointer
+                                     jitterFilter: longPress.jitterFilter, navigation: contactMode,
+                                     deferButtonTap: buttonTarget != nil)
+        var events = result.pointer
+        if result.completedTap, let button = buttonTarget {
+            if validButtonWindow(button, at: pressLocation) {
+                let shortTap = now >= contactStarted && now - contactStarted < NSEvent.doubleClickInterval
+                let sameWindow = validButtonWindow(button, at: button.point)
+                let clickPoint = shortTap && sameWindow ? buttonResolver.validatedPoint(button, deadline: ProcessInfo.processInfo.systemUptime + 0.02) : nil
+                if let clickPoint, validButtonWindow(button, at: clickPoint) {
+                    events = events.map { PointerEvent(action: $0.action, point: clickPoint) }
+                    longPressDiagnostic("笔尖模糊触控：按钮核对通过，本次点按采用近按钮位置")
+                } else {
+                    // Preserve the ordinary tap, but do not carry a rejected assisted target into another click.
+                    clicks.reset(); contactButtonIdentity = nil; previousClickButton = nil
+                    longPressDiagnostic("笔尖模糊触控：保留原始点按；\(!shortTap ? "长接触" : (!sameWindow ? "辅助位置窗口不同" : buttonResolver.validationFailure))")
+                }
+            } else {
+                events = []; clicks.reset(); contactButtonIdentity = nil; previousClickButton = nil
+                longPressDiagnostic("笔尖模糊触控：目标窗口改变，取消点击")
+            }
+            buttonTarget = nil
+        } else if !result.scroll.isEmpty || events.contains(where: { $0.action == .drag || $0.action == .rightDown }) {
+            if buttonTarget != nil { clicks.reset(); contactButtonIdentity = nil; previousClickButton = nil }
+            buttonTarget = nil
+        }
         if wasPending && !gesture.isPending {
             longPressDiagnostic(events.contains { $0.action == .drag }
                 ? "长按取消：移动超出抖动过滤范围（\(longPress.jitterFilter.title)，\(longPress.jitterFilter.tolerance) 逻辑点），进入拖动"
@@ -448,7 +522,7 @@ final class PointerOutput {
         emit(events)
         if gesture.hasScheduledClick { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
-        if !contact { contactSample = nil; fallbackContact = false; fallbackWindow = nil }
+        if !contact { contactSample = nil; fallbackContact = false; fallbackWindow = nil; buttonTarget = nil; contactButtonIdentity = nil }
         if tabletEnabled && (!sample.inRange || !sample.positionValid || sample.eraser) && inProximity {
             sendProximity(false, at: lastPoint)
         }
@@ -464,12 +538,14 @@ final class PointerOutput {
         if inProximity { sendProximity(false, at: lastPoint) }
         currentSample = nil; contactSample = nil
         clicks.reset()
+        buttonTarget = nil; contactButtonIdentity = nil; previousClickButton = nil; activeClickButton = nil
         fallbackContact = false; fallbackWindow = nil; scrollWindow = nil
     }
     private func emitScroll(_ events: [PenScrollEvent]) {
         for event in events {
             // A scroll sequence is never part of a later multiple-click sequence.
             clicks.reset()
+            buttonTarget = nil; contactButtonIdentity = nil; previousClickButton = nil; activeClickButton = nil
             guard sendScroll(event) else {
                 let cancelled = gesture.cancelNavigation()
                 for end in cancelled.scroll { _ = sendScroll(end) }
@@ -481,6 +557,11 @@ final class PointerOutput {
         guard let expected = fallbackWindow, let current = window(at: point) else { return false }
         return current.id == expected.id && current.app.processIdentifier == expected.app.processIdentifier
             && current.layer == 0 && current.bounds == expected.bounds
+    }
+    private func validButtonWindow(_ expected: ButtonTargetResolver.Target, at point: CGPoint) -> Bool {
+        guard let current = window(at: point) else { return false }
+        return current.id == expected.windowID && current.app.processIdentifier == expected.processID
+            && current.layer == 0 && current.bounds == expected.windowBounds
     }
     @discardableResult private func sendScroll(_ planned: PenScrollEvent) -> Bool {
         // Identified content and unknown content must both stay in the original real window.
@@ -636,7 +717,12 @@ final class PointerOutput {
         if action == .move { moveCount += 1 }
         if action == .drag { dragCount += 1 }
         lastPoint = point
-        if action == .up { clicks.end(now: ProcessInfo.processInfo.systemUptime, interval: NSEvent.doubleClickInterval) }
+        if action == .up {
+            let now = ProcessInfo.processInfo.systemUptime
+            clicks.end(now: now, interval: NSEvent.doubleClickInterval)
+            previousClickButton = now - contactStarted < NSEvent.doubleClickInterval ? activeClickButton : nil
+            activeClickButton = nil
+        }
         return true
     }
 }
