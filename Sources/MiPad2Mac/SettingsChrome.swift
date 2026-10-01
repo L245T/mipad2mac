@@ -116,7 +116,7 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
         view = NSView(); view.clipsToBounds = true
         scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
         NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
-        table.selectRowIndexes(IndexSet(integer: model.selection), byExtendingSelection: false)
+        table.selectRowIndexes(IndexSet(integer: model.selection.rawValue), byExtendingSelection: false)
     }
     func install(in window: NSWindow) {
         guard let guide = window.contentLayoutGuide as? NSLayoutGuide else { return }
@@ -126,7 +126,7 @@ final class SettingsNavigation: NSViewController, NSTableViewDataSource, NSTable
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: SystemSettingsController.names[row]); label.font = .systemFont(ofSize: 13)
-        let image = NSImageView(); image.image = NSImage(systemSymbolName: ["pencil", "checkmark.shield", "waveform.path", "gearshape", "info.circle"][row], accessibilityDescription: nil)
+        let image = NSImageView(); image.image = NSImage(systemSymbolName: SettingsDestination.allCases[row].symbol, accessibilityDescription: nil)
         image.symbolConfiguration = .init(pointSize: 17, weight: .regular)
         cell.textField = label; cell.imageView = image
         for child in [label, image] { child.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(child) }

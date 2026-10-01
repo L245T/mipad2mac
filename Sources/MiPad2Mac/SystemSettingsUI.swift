@@ -2,11 +2,35 @@ import AppKit
 import SwiftUI
 import MiPadCore
 
+enum SettingsDestination: Int, CaseIterable {
+    case control, applicationModes, permissions, testing, settings, about
+    var title: String {
+        switch self {
+        case .control: return "控制"
+        case .applicationModes: return "应用笔模式"
+        case .permissions: return "权限检查"
+        case .testing: return "测试"
+        case .settings: return "设置"
+        case .about: return "关于"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .control: return "pencil"
+        case .applicationModes: return "app"
+        case .permissions: return "checkmark.shield"
+        case .testing: return "waveform.path"
+        case .settings: return "gearshape"
+        case .about: return "info.circle"
+        }
+    }
+}
+
 /// The presentation bridge refreshes at the existing 2 Hz UI cadence, never the HID cadence.
 final class SettingsPresentation: ObservableObject {
     unowned let app: AppDelegate
     @Published var generation = 0
-    @Published var selection = 0
+    @Published var selection = SettingsDestination.control
     @Published var contentTopInset: CGFloat = 0
     private var signature = ""
     init(_ app: AppDelegate) { self.app = app }
@@ -20,6 +44,7 @@ final class SettingsPresentation: ObservableObject {
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
             String(app.enabled), String(app.output.tabletEnabled), String(app.output.momentumEnabled), String(app.monitoring),
+            app.output.configuredProfiles.map { "\($0.bundleID):\($0.name):\($0.mode.rawValue)" }.joined(separator: "|"),
             app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
@@ -34,7 +59,7 @@ final class SettingsPresentation: ObservableObject {
 final class SystemSettingsController: NSSplitViewController {
     let model: SettingsPresentation
     private var opaqueSidebar: NSView?
-    static let names = ["控制", "权限检查", "测试", "设置", "关于"]
+    static let names = SettingsDestination.allCases.map(\.title)
     init(app: AppDelegate) { model = SettingsPresentation(app); super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
@@ -60,14 +85,17 @@ final class SystemSettingsController: NSSplitViewController {
         window.toolbar = toolbar
         (splitViewItems.last?.viewController as? SettingsContentController)?.install(in: window)
         (splitViewItems.first?.viewController as? SettingsNavigation)?.install(in: window)
-        selectTabViewItem(at: 0)
+        select(.control)
     }
     func selectTabViewItem(at index: Int) {
-        guard Self.names.indices.contains(index) else { return }
-        model.selection = index
-        (splitViewItems.first?.viewController as? SettingsNavigation)?.select(index)
-        model.app.window.title = Self.names[index]
-        (splitViewItems.last?.viewController as? SettingsContentController)?.heading.stringValue = Self.names[index]
+        guard let destination = SettingsDestination(rawValue: index) else { return }
+        select(destination)
+    }
+    func select(_ destination: SettingsDestination) {
+        model.selection = destination
+        (splitViewItems.first?.viewController as? SettingsNavigation)?.select(destination.rawValue)
+        model.app.window.title = destination.title
+        (splitViewItems.last?.viewController as? SettingsContentController)?.heading.stringValue = destination.title
     }
     @objc private func updateMaterial() {
         guard let sidebar = splitViewItems.first?.viewController.view else { return }
@@ -93,11 +121,12 @@ struct SettingsDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 switch model.selection {
-                case 0: control
-                case 1: permissions
-                case 2: testing
-                case 3: settings
-                default: about
+                case .control: control
+                case .applicationModes: AppPenModesPage(model: model)
+                case .permissions: permissions
+                case .testing: testing
+                case .settings: settings
+                case .about: about
                 }
             }.padding(20).padding(.top, model.contentTopInset).frame(maxWidth: .infinity, alignment: .leading)
                 .background(SettingsScrollTrack(extendsUnderTitlebar: true, topInset: model.contentTopInset))
@@ -157,24 +186,6 @@ struct SettingsDetail: View {
                 Toggle("水平翻转", isOn: Binding(get: { app.flipX.state == .on }, set: { value in model.act { app.flipX.state = value ? .on : .off; app.mappingChanged() } }))
                 Toggle("垂直翻转", isOn: Binding(get: { app.flipY.state == .on }, set: { value in model.act { app.flipY.state = value ? .on : .off; app.mappingChanged() } }))
             } header: { Text("显示器") } footer: { footerNote("“跟随系统”自动适配目标显示器的旋转，也可手动指定角度；旋转方向自动保存。修改映射会结束当前笔画，处理方式保持不变。目标显示器仅用于本次运行，不会自动保存；手动选屏后不会被自动识别覆盖。显示的是逻辑分辨率。") }
-            SettingsSection {
-                SettingsPicker("应用", selection: Binding(get: { app.output.profileID ?? "" }, set: { value in model.act { app.output.selectProfile(value) } })) {
-                    if app.output.profileID == nil { Text("请先选择应用").tag("") }
-                    ForEach(app.output.profileApplications.keys.sorted(), id: \.self) { id in
-                        Text(app.output.profileApplications[id] ?? id).tag(id)
-                    }
-                }
-                HStack(spacing: 12) {
-                    SettingsPicker("输入模式", selection: Binding(get: { app.output.profileMode }, set: { value in model.act { app.output.changeNavigation(value) } })) {
-                        ForEach(PenApplicationMode.allCases, id: \.rawValue) { Text($0.title).tag($0) }
-                    }.disabled(app.output.profileID == nil)
-                    ExplanationButton(text: applicationModeHelp, label: "输入模式说明")
-                }
-                settingDescription(applicationModeSummary)
-                HStack { Spacer(); Button("添加或选择应用…") { model.act { app.output.chooseNavigationApplication() } } }
-            } header: { Text("应用笔设置") } footer: {
-                footerNote("按应用自动保存，也可从HID菜单切换。绘画前请选择绘画模式。")
-            }
             SettingsSection {
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
@@ -244,17 +255,6 @@ struct SettingsDetail: View {
             }
         }
     }
-    private var applicationModeSummary: String {
-        guard app.output.profileID != nil else { return "选择应用后，可分别设置指针、浏览或绘画模式。" }
-        switch app.output.profileMode {
-        case .pointer: return "拖动、选字和点击；静止长按可触发右键。"
-        case .browse: return "滑动滚动；双击或三击后，按住最后一下拖动选字。"
-        case .drawing: return "即时落笔；不滚动、不触发长按右键。"
-        }
-    }
-    private var applicationModeHelp: String {
-        "指针：轻点单击，按住移动拖动，连续点按可选字；静止长按按全局设置执行。\n\n浏览：滑动滚动，轻点单击；双击或三击后，按住最后一下拖动选字。同次拖选不滚动、不触发长按右键。浏览持续生效，无需逐次开启。\n\n已识别的顶栏、工具栏和输入控件保留普通操作；未知普通内容默认滚动，窗口顶部保留拖动。未知输入框或自定义工具栏也可能滚动，需要普通拖动时请将此应用设为指针模式。\n\n绘画：即时落笔，不滚动、不触发长按及兼容右键；压力与倾斜遵循全局开关。原长按排除应用已按绘画保留，可在此调整。\n\n未知应用默认指针，不会自动判断绘画用途；选择按应用保存。"
-    }
     private func showLongPressHelp(section: Int) {
         longPressHelpState.prepare(for: app.window)
         longPressHelpState.section = section
@@ -313,7 +313,7 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 DisclosureGroup {
-                    settingDescription("先开启MiPad2Mac控制和长按右键。进入拖动后，本次接触不再触发右键。应用笔设置为绘画模式时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
+                    settingDescription("先开启MiPad2Mac控制和长按右键。进入拖动后，本次接触不再触发右键。应用笔模式设为绘画时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
                 } label: {
                     Text("1. 确认长按条件").font(.headline)
                 }.disclosureGroupStyle(HelpDisclosureStyle(summary: "笔尖停住，等到设定时间；先在桌面试一次。"))
@@ -581,7 +581,7 @@ private final class LongPressHelpState: ObservableObject {
 }
 
 /// AppKit's standard help button retains native sizing, keyboard access and popover styling.
-private struct ExplanationButton: NSViewRepresentable {
+struct ExplanationButton: NSViewRepresentable {
     let text: String
     var label: String = "查看说明"
     func makeNSView(context: Context) -> HelpButton {

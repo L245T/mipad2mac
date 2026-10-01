@@ -111,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         readerStartupDeferred = !inputAllowed
         if !readerStartupDeferred { reader.start() }
         if startupCoordinator.presentation.shouldSelectPermissions(permissionsReady: permissionsReady) {
-            tabs.selectTabViewItem(at: 1)
+            tabs.select(.permissions)
         }
         tabs.model.sync()
         if startupCoordinator.presentation.showMainWindow { presentMainWindow() }
@@ -229,8 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         toggle()
         if !enabled && statusLabel.stringValue != "鼠标控制已暂停" { showWindow() }
     }
-    @objc func showSettings() { tabs.selectTabViewItem(at: 3); settingsPage.refresh(); showSelectedPage() }
-    @objc func showPermissions() { refreshPermissions(); tabs.selectTabViewItem(at: 1); showSelectedPage() }
+    @objc func showSettings() { tabs.select(.settings); settingsPage.refresh(); showSelectedPage() }
+    @objc func showPermissions() { refreshPermissions(); tabs.select(.permissions); showSelectedPage() }
     @objc func refreshPermissions() { permissionCheckedAt = -Double.infinity; refreshStats() }
     @objc func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "MiPad2Mac", .applicationVersion: appVersion, .credits: NSAttributedString(string: "作者：力利欧 @L245T\nPowered by GPT6-Astra\n基于 macOS 27 开发，macOS 26 暂未测试。\n小米平板 DP-in 笔输入适配\n当前仅支持触控笔输入")])
@@ -238,7 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func openProject() { NSWorkspace.shared.open(UpdateChecker.projectURL) }
-    @objc func checkUpdates() { guard !nativeUpdater.busy else { return }; tabs.selectTabViewItem(at: 4); showSelectedPage(); updateChecker.check(manual: true, window: window) }
+    @objc func checkUpdates() { guard !nativeUpdater.busy else { return }; tabs.select(.about); showSelectedPage(); updateChecker.check(manual: true, window: window) }
     @objc func updatePreferenceChanged() {
         updateChecker.setAutomatically(autoUpdate.state == .on)
     }
@@ -413,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .wait: break
         case .requestPermissions:
             if !startupCoordinator.suppressPermissionPresentation {
-                tabs.selectTabViewItem(at: 1); presentMainWindow()
+                tabs.select(.permissions); presentMainWindow()
             }
         case .enable: enableControl()
         }
@@ -635,7 +635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc func showWindow() {
         refreshPermissions()
-        if !permissionsReady || !startupCoordinator.notices.isEmpty { tabs.selectTabViewItem(at: 1) }
+        if !permissionsReady || !startupCoordinator.notices.isEmpty { tabs.select(.permissions) }
         showSelectedPage()
         offerManualPenSelection()
     }
