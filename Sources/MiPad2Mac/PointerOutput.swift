@@ -168,6 +168,7 @@ final class PointerOutput {
         let region: PenHitRegion
         let nodes: [PenHitNode]
         let endReason: String
+        let panels: [PenPanelMetadata]
     }
     /// AppKit mouse-down hit testing skips transparent/ignoresMouseEvents overlays.
     private struct ScrollWindow {
@@ -210,6 +211,7 @@ final class PointerOutput {
         let app = NSRunningApplication(processIdentifier: pid)
         if app?.bundleIdentifier == nil { longPressDiagnostic("长按目标没有应用标识：PID \(pid)") }
         var nodes: [PenHitNode] = []
+        var panels: [PenPanelMetadata] = []
         var ancestor = element
         var endReason = "层数上限"
         for _ in 0..<32 {
@@ -233,6 +235,35 @@ final class PointerOutput {
                 }
             }
             nodes.append(PenHitNode(role: role, valueEditable: editable))
+            if role == kAXWindowRole || role == kAXSheetRole {
+                func metadata(_ key: String) -> CFTypeRef? {
+                    let left = deadline - ProcessInfo.processInfo.systemUptime
+                    guard left > 0 else { return nil }
+                    AXUIElementSetMessagingTimeout(ancestor, Float(min(0.03, left)))
+                    var value: CFTypeRef?
+                    return AXUIElementCopyAttributeValue(ancestor, key as CFString, &value) == .success ? value : nil
+                }
+                let identifier = metadata(kAXIdentifierAttribute) as? String
+                // Query additional metadata only for the two independently observed native panel identifiers.
+                if identifier == "open-panel" || identifier == "save-panel" {
+                    var owner: pid_t = 0
+                    if AXUIElementGetPid(ancestor, &owner) == .success {
+                        let subrole = metadata(kAXSubroleAttribute) as? String
+                        let modal = metadata(kAXModalAttribute) as? Bool
+                        var bounds: CGRect?
+                        if let position = metadata(kAXPositionAttribute), let size = metadata(kAXSizeAttribute),
+                           CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() {
+                            var point = CGPoint.zero, dimensions = CGSize.zero
+                            if AXValueGetValue(unsafeBitCast(position, to: AXValue.self), .cgPoint, &point),
+                               AXValueGetValue(unsafeBitCast(size, to: AXValue.self), .cgSize, &dimensions) {
+                                bounds = CGRect(origin: point, size: dimensions)
+                            }
+                        }
+                        panels.append(PenPanelMetadata(role: role, subrole: subrole, identifier: identifier,
+                                                       isModal: modal, bounds: bounds, processID: owner))
+                    }
+                }
+            }
             if role == kAXWindowRole { endReason = "到达窗口"; break }
             let parentRemaining = deadline - ProcessInfo.processInfo.systemUptime
             guard parentRemaining > 0 else { endReason = "查询超时"; break }
@@ -243,7 +274,7 @@ final class PointerOutput {
             }
             ancestor = unsafeBitCast(value, to: AXUIElement.self)
         }
-        return PenTarget(app: app, region: PenHitRegion.classify(nodes: nodes), nodes: nodes, endReason: endReason)
+        return PenTarget(app: app, region: PenHitRegion.classify(nodes: nodes), nodes: nodes, endReason: endReason, panels: panels)
     }
 
     func changeLongPress(_ edit: (LongPressPreferences) -> Void) {
@@ -335,7 +366,18 @@ final class PointerOutput {
             let matchingHit = topWindow == nil || hit?.app?.processIdentifier == topWindow?.app.processIdentifier ? hit : nil
             let resolvedApp = topWindow?.app ?? matchingHit?.app
             let targetApp = matchingHit?.app
-            let appMode = applicationProfiles.mode(for: resolvedApp?.bundleIdentifier ?? frontmost?.bundleIdentifier)
+            let ownWindow = topWindow?.app.processIdentifier == ProcessInfo.processInfo.processIdentifier
+            let ordinaryWindow = topWindow?.layer == 0 && (!ownWindow || diagnosticOwnWindow)
+            let filePanel = ordinaryWindow && (hit?.panels.contains {
+                PenSystemFilePanel.matches($0, point: pressLocation, windowBounds: topWindow?.bounds,
+                                           windowProcessID: topWindow?.app.processIdentifier, windowLayer: topWindow?.layer)
+            } ?? false)
+            var context = PenApplicationTargetContext.unresolved
+            if ordinaryWindow, let id = topWindow?.app.bundleIdentifier {
+                context = filePanel ? .systemFilePanel : .ordinaryApplication(bundleID: id)
+            }
+            let appMode = applicationProfiles.mode(for: context)
+            if filePanel { longPressDiagnostic("系统文件窗格采用默认\(appMode.title)；应用绘画例外不作用于此窗格") }
             let unknown = matchingHit?.region == nil || matchingHit?.region == .unknown
             contactMode = PenBrowseRouting.mode(applicationMode: appMode, region: matchingHit?.region ?? .unknown,
                 point: pressLocation, windowBounds: topWindow?.bounds, windowLayer: topWindow?.layer,

@@ -35,6 +35,42 @@ enum PenApplicationID {
 
 public enum PenApplicationProfileScope: Equatable { case application, photoshopVersions }
 
+public enum PenApplicationTargetContext: Equatable {
+    case ordinaryApplication(bundleID: String)
+    case systemFilePanel
+    case unresolved
+}
+
+/// Public AX metadata only; no title, accessible value or file content.
+public struct PenPanelMetadata: Equatable {
+    public let role: String
+    public let subrole: String?
+    public let identifier: String?
+    public let isModal: Bool?
+    public let bounds: CGRect?
+    public let processID: Int32
+    public init(role: String, subrole: String?, identifier: String?, isModal: Bool?, bounds: CGRect?, processID: Int32) {
+        self.role = role; self.subrole = subrole; self.identifier = identifier
+        self.isModal = isModal; self.bounds = bounds; self.processID = processID
+    }
+}
+
+public enum PenSystemFilePanel {
+    public static func matches(_ panel: PenPanelMetadata, point: CGPoint, windowBounds: CGRect?,
+                               windowProcessID: Int32?, windowLayer: Int?) -> Bool {
+        guard panel.identifier == "open-panel" || panel.identifier == "save-panel",
+              panel.isModal == true,
+              panel.role == "AXSheet" || (panel.role == "AXWindow" && ["AXDialog", "AXSystemDialog"].contains(panel.subrole ?? "")),
+              panel.processID > 0, panel.processID == windowProcessID, windowLayer == 0,
+              let bounds = panel.bounds, bounds.width > 0, bounds.height > 0, bounds.contains(point),
+              let windowBounds, windowBounds.contains(point) else { return false }
+        if panel.role == "AXSheet" { return windowBounds.insetBy(dx: -2, dy: -2).contains(bounds) }
+        // AX and CG must describe this window, not a different modal window from the same process.
+        return abs(bounds.minX - windowBounds.minX) <= 2 && abs(bounds.minY - windowBounds.minY) <= 2
+            && abs(bounds.width - windowBounds.width) <= 2 && abs(bounds.height - windowBounds.height) <= 2
+    }
+}
+
 public struct PenApplicationProfile: Equatable {
     public let bundleID: String
     public let name: String
@@ -112,6 +148,13 @@ public final class PenApplicationPreferences {
             if defaults.object(forKey: "penLongPressExcludedApps") == nil { return .drawing }
         }
         return defaultApplicationMode
+    }
+    public func mode(for target: PenApplicationTargetContext) -> PenApplicationMode {
+        switch target {
+        case .ordinaryApplication(let id): return mode(for: id)
+        case .systemFilePanel: return defaultApplicationMode
+        case .unresolved: return .pointer
+        }
     }
     /// Reports explicit browse records, not whether an unconfigured application can browse.
     public var hasBrowseApplications: Bool { applications.keys.contains { mode(for: $0) == .browse } }

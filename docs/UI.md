@@ -180,3 +180,8 @@ macOS27隔离预览已检查720×580内容区域、长名称截断与未安装�
 核心已提供PointerOutput.defaultApplicationMode／setDefaultApplicationMode(_:)及HID默认模式子菜单；默认保存到penDefaultApplicationMode，初始浏览。独立页面选择入口与“应用例外”文案待串行接入，不能将当前固定提示视作新默认控件。
 
 configuredProfiles包含可编辑删除的Photoshop家族兼容规则；PenApplicationProfile.scope为application或photoshopVersions，scopeDescription说明所有版本范围与具体版本例外优先。家族行应使用规则标记与范围说明，不能当作已安装App。删除家族只停止继承，保留具体版本明确记录。新添加采用当前默认，删除采用当前默认；模式变化先释放，抬笔后生效。
+
+
+## 系统文件窗格路由边界（2026-10-01）
+
+Photoshop2026打开窗格实测同PID、open-panel／AXDialog／modal=true；独立NSSavePanel模态窗格核对save-panel。核心只在标识、模态角色、当前窗口PID／层级／几何均匹配时采用全局默认，普通画布子窗口保留应用例外；无可信窗口不沿用前台绘画。非模态、跨PID／helper、云保存和无明确标识的自定义弹窗不一律改模式。Photoshop真实SaveAs及实体笔仍待验证，不写成全应用自动判断完成。

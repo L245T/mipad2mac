@@ -596,11 +596,44 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.check(self.output.momentumActive, "默认浏览应用抬笔后进入惯性")
             self.output.setDefaultApplicationMode(.pointer)
             self.check(!self.output.momentumActive, "修改默认模式立即停止惯性")
+            self.profileScrollBefore = self.output.scrollEventCount
+        }
+        // Already-posted momentum can arrive after cancellation; drain that queue before counting new frames.
+        append(after: 0.05) {
             self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count
         }
         append(after: 0.08) {
             self.check(self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore,
                        "默认修改后不继续投递惯性帧")
+            self.check(self.output.scrollEventCount == self.profileScrollBefore,
+                       "默认修改后提交计数不增加，区分已排队帧与新惯性输出")
+            self.output.momentumEnabled = false
+            self.output.setDefaultApplicationMode(.browse)
+            self.output.setApplicationProfileMode(.drawing, for: id, name: "本地事件验收")
+            self.window.setAccessibilityIdentifier("open-panel")
+            self.window.setAccessibilitySubrole(.dialog)
+            self.window.setAccessibilityModal(true)
+            self.profileDownBefore = self.output.downCount; self.fallbackScrollBefore = self.view.bridgeScrolls
+        }
+        append(after: 0.08) { self.pen(); self.pen(0.5, 0.65); self.pen(down: false) }
+        append(after: 0.08) {
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore && self.output.downCount == self.profileDownBefore,
+                       "已确认open-panel同PID窗格采用默认浏览而非绘画例外")
+            self.window.setAccessibilityIdentifier("save-panel")
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.pen(); self.pen(0.5, 0.65); self.pen(down: false)
+        }
+        append(after: 0.08) {
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore && self.output.downCount == self.profileDownBefore,
+                       "已确认save-panel窗格同样绕过应用绘画例外")
+            self.window.setAccessibilityIdentifier("custom-canvas")
+            self.window.setAccessibilitySubrole(.standardWindow); self.window.setAccessibilityModal(false)
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.pen(); self.pen(0.5, 0.65); self.pen(down: false)
+        }
+        append(after: 0.08) {
+            self.check(self.output.downCount == self.profileDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore,
+                       "应用自己的普通画布窗口继续即时绘画")
             self.finish()
         }
         runNext()

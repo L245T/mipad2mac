@@ -190,6 +190,40 @@ struct PenApplicationPreferencesTests {
         defaults.set(["example": "bad"], forKey: "penApplicationInteractionModes")
         #expect(PenApplicationPreferences(defaults: defaults).mode(for: "example") == .browse)
     }
+    @Test func filePanelsUseDefaultWhileDrawingWindowsKeepTheirException() throws {
+        let suite = "pen-panel-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        profiles.set(.drawing, for: "paint", name: "Paint")
+        for mode in PenApplicationMode.allCases {
+            profiles.defaultApplicationMode = mode
+            #expect(profiles.mode(for: .systemFilePanel) == mode)
+            #expect(profiles.mode(for: .ordinaryApplication(bundleID: "paint")) == .drawing)
+            #expect(profiles.mode(for: .ordinaryApplication(bundleID: "reader")) == mode)
+            #expect(profiles.mode(for: .unresolved) == .pointer)
+        }
+    }
+    @Test func panelRecognitionRequiresIdentifierModalRoleProcessAndGeometry() {
+        let bounds = CGRect(x: 100, y: 100, width: 880, height: 448), point = CGPoint(x: 300, y: 300)
+        func match(_ id: String?, role: String = "AXWindow", subrole: String? = "AXDialog", modal: Bool? = true,
+                   pid: Int32 = 12, frame: CGRect? = CGRect(x: 100, y: 100, width: 880, height: 448),
+                   layer: Int? = 0, windowPID: Int32? = 12) -> Bool {
+            PenSystemFilePanel.matches(PenPanelMetadata(role: role, subrole: subrole, identifier: id,
+                isModal: modal, bounds: frame, processID: pid), point: point, windowBounds: bounds,
+                windowProcessID: windowPID, windowLayer: layer)
+        }
+        #expect(match("open-panel")); #expect(match("save-panel"))
+        #expect(!match(nil)); #expect(!match("custom-panel")); #expect(!match("open-panel", modal: nil))
+        #expect(!match("open-panel", modal: false)); #expect(!match("open-panel", subrole: "AXStandardWindow"))
+        #expect(!match("open-panel", role: "AXGroup")); #expect(!match("open-panel", pid: 13))
+        #expect(!match("open-panel", windowPID: nil)); #expect(!match("open-panel", frame: nil))
+        #expect(!match("open-panel", layer: 3)); #expect(!match("open-panel", pid: 0, windowPID: 0))
+        #expect(!match("open-panel", frame: CGRect(x: 200, y: 200, width: 880, height: 448)))
+        #expect(match("open-panel", role: "AXSheet", subrole: nil,
+                      frame: CGRect(x: 120, y: 120, width: 500, height: 350)))
+        #expect(!match("open-panel", role: "AXSheet", subrole: nil,
+                       frame: CGRect(x: 120, y: 120, width: 1500, height: 350)))
+    }
     @Test func readOnlyTextAndWebCardsScrollWithoutTurningEditorsIntoPages() {
         let text = { (editable: Bool?) in PenHitNode(role: "AXTextArea", valueEditable: editable) }
         let scroll = PenHitNode(role: "AXScrollArea"), window = PenHitNode(role: "AXWindow")
