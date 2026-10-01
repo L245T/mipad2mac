@@ -226,13 +226,13 @@ struct SettingsDetail: View {
                 }
                 LabeledContent("虚拟按键") {
                     Text("暂不支持").foregroundStyle(.secondary)
-                    ExplanationButton(text: "已知笔接口中未检测到捏、双击或滑动笔杆的可用控制数据，暂无法映射为按键。", label: "虚拟按键暂不支持的原因")
+                    ExplanationButton(text: "小米平板当前固件向Mac提供的笔数据不包含捏、双击或滑动笔杆等手势数据。硬件连接未提供这些数据，MiPad2Mac无法获取并适配为虚拟按键。", label: "虚拟按键暂不支持的原因")
                 }
             } header: { Text("笔输入") } footer: { EmptyView() }
             SettingsSection("手指输入") {
                 LabeledContent("状态") {
                     Text("暂不支持").foregroundStyle(.secondary)
-                    ExplanationButton(text: "已分析的平板固件在Mac连接模式下不转发手指触摸数据，本程序目前无法接入。", label: "手指输入暂不支持的原因")
+                    ExplanationButton(text: "DP-in连接时，小米平板当前固件根据USB-C连接的厂商标识识别Mac，并进入Mac分支。该分支不传输手指触摸数据，MiPad2Mac无法从硬件连接获取这些数据，因此暂不支持手指输入。", label: "手指输入暂不支持的原因")
                 }
             }
         }
