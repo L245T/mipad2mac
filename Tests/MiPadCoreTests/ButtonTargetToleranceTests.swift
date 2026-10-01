@@ -60,6 +60,15 @@ import Testing
         #expect(!ButtonTargetGeometry.permitsMiss(roles: ["AXGroup", role, "AXWindow"]))
     }
 }
+@Test func windowButtonMissAllowsTitlebarButProtectsContentHits() {
+    #expect(ButtonTargetGeometry.permitsWindowButtonMiss(roles: ["AXTitleBar", "AXWindow"]))
+    #expect(ButtonTargetGeometry.permitsWindowButtonMiss(roles: ["AXGroup", "AXTitleBar", "AXWindow"]))
+    #expect(!ButtonTargetGeometry.permitsWindowButtonMiss(roles: []))
+    for role in ["AXStaticText", "AXButton", "AXTextField", "AXTextArea", "AXLink", "AXMenuItem", "AXSlider"] {
+        #expect(!ButtonTargetGeometry.permitsWindowButtonMiss(roles: [role, "AXTitleBar", "AXWindow"]))
+    }
+    #expect(!ButtonTargetGeometry.permitsMiss(roles: ["AXTitleBar", "AXWindow"]))
+}
 private let buttonMapping = Mapping(bounds: CGRect(x: 0, y: 0, width: 101, height: 101))
 private func buttonSample(_ x: Double = 0.5, touching: Bool = true, inRange: Bool = true) -> Sample {
     Sample(x: x, y: 0.5, touching: touching, inRange: inRange)

@@ -56,4 +56,8 @@ public enum ButtonTargetGeometry {
                          "AXPopUpButton", "AXMenu", "AXMenuItem", "AXMenuBar", "AXTabGroup"]
         return roles.first.map { containers.contains($0) } == true && !roles.contains { protected.contains($0) }
     }
+    /// Title-bar misses may target only dedicated native window controls, never content buttons.
+    public static func permitsWindowButtonMiss(roles: [String]) -> Bool {
+        permitsMiss(roles: roles.filter { $0 != "AXTitleBar" })
+    }
 }

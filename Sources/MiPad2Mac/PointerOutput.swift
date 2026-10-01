@@ -407,15 +407,31 @@ final class PointerOutput {
                 context = filePanel ? .systemFilePanel : .ordinaryApplication(bundleID: id)
             }
             let appMode = applicationProfiles.mode(for: context)
+            let buttonDeadline = min(targetDeadline, ProcessInfo.processInfo.systemUptime + 0.02)
+            // Native window controls apply across app modes, including our own chrome.
+            // Keep body controls and drawing canvases on their existing paths.
+            if buttonPreferences.radius > 0, topWindow?.layer == 0,
+               let matchingHit, let topWindow, let axWindow = matchingHit.windowElement,
+               matchingHit.app?.processIdentifier == topWindow.app.processIdentifier,
+               matchingHit.buttonElement == nil,
+               ButtonTargetGeometry.permitsWindowButtonMiss(roles: matchingHit.nodes.map { $0.role }) {
+                buttonTarget = buttonResolver.resolveWindowButton(point: pressLocation, radius: buttonPreferences.radius,
+                    window: axWindow, windowID: topWindow.id, processID: topWindow.app.processIdentifier,
+                    windowBounds: topWindow.bounds, deadline: buttonDeadline)
+                if let buttonTarget {
+                    contactButtonIdentity = ButtonIdentity(element: buttonTarget.element, windowID: topWindow.id)
+                    longPressDiagnostic("笔尖模糊触控：已找到原生窗口按钮，等待短点按完成后核对")
+                }
+            }
             if appMode != .drawing, ordinaryWindow, buttonPreferences.radius > 0,
                let matchingHit, let topWindow, let axWindow = matchingHit.windowElement,
                matchingHit.app?.processIdentifier == topWindow.app.processIdentifier {
                 if let button = matchingHit.buttonElement {
                     contactButtonIdentity = ButtonIdentity(element: button, windowID: topWindow.id)
-                } else if ButtonTargetGeometry.permitsMiss(roles: matchingHit.nodes.map { $0.role }) {
+                } else if buttonTarget == nil && ButtonTargetGeometry.permitsMiss(roles: matchingHit.nodes.map { $0.role }) {
                     buttonTarget = buttonResolver.resolve(point: pressLocation, radius: buttonPreferences.radius,
                         window: axWindow, windowID: topWindow.id, processID: topWindow.app.processIdentifier,
-                        windowBounds: topWindow.bounds, deadline: min(targetDeadline, ProcessInfo.processInfo.systemUptime + 0.02))
+                        windowBounds: topWindow.bounds, deadline: buttonDeadline)
                     if let buttonTarget {
                         contactButtonIdentity = ButtonIdentity(element: buttonTarget.element, windowID: topWindow.id)
                         longPressDiagnostic("笔尖模糊触控：已找到近按钮，等待短点按完成后核对")
@@ -434,6 +450,7 @@ final class PointerOutput {
                 point: pressLocation, windowBounds: topWindow?.bounds, windowLayer: topWindow?.layer,
                 ownWindow: topWindow?.app.processIdentifier == ProcessInfo.processInfo.processIdentifier,
                 allowOwnWindow: diagnosticOwnWindow)
+            if buttonTarget?.windowButtonAttribute != nil { contactMode = .pointer }
             fallbackContact = contactMode == .browse && unknown
             fallbackWindow = fallbackContact ? topWindow : nil
             nextWindowValidation = 0
@@ -454,6 +471,7 @@ final class PointerOutput {
                 longPressDiagnostic("浏览区域判定：\(targetApp?.bundleIdentifier ?? "未知")；\(path)；\(hit?.endReason ?? "目标查询失败")；区域\(String(describing: hit?.region)) → \(contactMode.title)")
             }
             deferredContact = longPress.enabled && appMode != .drawing && matchingHit?.region != .chrome && (!unknown || fallbackContact) && (targetApp != nil || fallbackContact) && !multiTapSelection
+            if buttonTarget?.windowButtonAttribute != nil { deferredContact = false }
             if multiTapSelection { longPressDiagnostic("连续点按：本次接触保持文字选择，不滚动、不触发长按右键") }
             compatibilityContact = deferredContact && longPress.compatibilityEnabled
                 && (resolvedApp?.bundleIdentifier.map { id in

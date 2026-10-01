@@ -194,11 +194,14 @@ struct PenApplicationPreferencesTests {
         let suite = "pen-panel-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let profiles = PenApplicationPreferences(defaults: defaults)
-        profiles.set(.drawing, for: "paint", name: "Paint")
+        let drawingApplications = ["paint", "org.example.paint.2024", "org.example.paint.2027"]
+        for id in drawingApplications { profiles.set(.drawing, for: id, name: "Paint") }
         for mode in PenApplicationMode.allCases {
             profiles.defaultApplicationMode = mode
             #expect(profiles.mode(for: .systemFilePanel) == mode)
-            #expect(profiles.mode(for: .ordinaryApplication(bundleID: "paint")) == .drawing)
+            for id in drawingApplications {
+                #expect(profiles.mode(for: .ordinaryApplication(bundleID: id)) == .drawing)
+            }
             #expect(profiles.mode(for: .ordinaryApplication(bundleID: "reader")) == mode)
             #expect(profiles.mode(for: .unresolved) == .pointer)
         }

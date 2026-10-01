@@ -13,6 +13,8 @@ final class ButtonTargetResolver {
         let windowBounds: CGRect
         let bounds: CGRect
         let point: CGPoint
+        var windowButtonAttribute: String? = nil
+        var windowButtonSubrole: String? = nil
     }
     private struct Metadata {
         let role: String
@@ -107,13 +109,67 @@ final class ButtonTargetResolver {
                       windowBounds: windowBounds, bounds: candidate.1,
                       point: ButtonTargetGeometry.clickPoint(from: point, inside: candidate.1))
     }
+    /// Native window controls have a complete, small public attribute set. Do not scan content.
+    func resolveWindowButton(point: CGPoint, radius: Double, window: AXUIElement, windowID: CGWindowID,
+                             processID: pid_t, windowBounds: CGRect, deadline: TimeInterval) -> Target? {
+        guard radius > 0, windowBounds.contains(point),
+              let root = metadata(window, deadline: deadline), root.role == kAXWindowRole,
+              root.bounds == windowBounds, prepare(window, deadline: deadline) else { return nil }
+        let keys = [kAXCloseButtonAttribute, kAXMinimizeButtonAttribute, kAXZoomButtonAttribute, kAXFullScreenButtonAttribute]
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(window, keys as CFArray, [], &values) == .success,
+              let entries = values as? [Any], entries.count == keys.count else { return nil }
+        var candidates: [(AXUIElement, CGRect, String, String)] = []
+        var seen: [AXUIElement] = []
+        for (index, item) in entries.enumerated() {
+            let value = item as CFTypeRef
+            if CFGetTypeID(value) == AXValueGetTypeID() {
+                var error = AXError.failure
+                guard AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .axError, &error),
+                      error == .noValue || error == .attributeUnsupported else { return nil }
+                continue // The public contract only requires attributes for controls that exist.
+            }
+            guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+            let element = unsafeBitCast(value, to: AXUIElement.self)
+            if seen.contains(where: { CFEqual($0, element) }) { continue } // Zoom/fullscreen may alias.
+            seen.append(element)
+            var owner: pid_t = 0
+            guard AXUIElementGetPid(element, &owner) == .success, owner == processID,
+                  let data = metadata(element, deadline: deadline), data.role == kAXButtonRole,
+                  let frame = data.bounds, windowBounds.contains(frame), let enabled = data.enabled,
+                  let subrole = data.subrole else { return nil }
+            let expected = index == 0 ? [kAXCloseButtonSubrole] : index == 1 ? [kAXMinimizeButtonSubrole]
+                : [kAXZoomButtonSubrole, kAXFullScreenButtonSubrole]
+            guard expected.contains(subrole) else { return nil }
+            guard prepare(element, deadline: deadline) else { return nil }
+            var parentWindow: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &parentWindow) == .success,
+                  let parentWindow, CFEqual(parentWindow, window) else { return nil }
+            if enabled && !data.hidden { candidates.append((element, frame, keys[index], subrole)) }
+        }
+        guard ProcessInfo.processInfo.systemUptime < deadline,
+              let index = ButtonTargetGeometry.nearest(to: point, radius: radius,
+                    frames: candidates.map { $0.1 }, complete: true) else { return nil }
+        let c = candidates[index]
+        return Target(element: c.0, window: window, windowID: windowID, processID: processID,
+                      windowBounds: windowBounds, bounds: c.1,
+                      point: ButtonTargetGeometry.clickPoint(from: point, inside: c.1),
+                      windowButtonAttribute: c.2, windowButtonSubrole: c.3)
+    }
     func validatedPoint(_ target: Target, deadline: TimeInterval) -> CGPoint? {
         validationFailure = "按钮或窗口元数据改变／超时"
         var pid: pid_t = 0
         guard AXUIElementGetPid(target.element, &pid) == .success, pid == target.processID,
               let data = metadata(target.element, deadline: deadline), data.role == kAXButtonRole,
               data.enabled == true, !data.hidden, data.bounds == target.bounds,
-              let root = metadata(target.window, deadline: deadline), root.bounds == target.windowBounds else { return nil }
+              let root = metadata(target.window, deadline: deadline), root.role == kAXWindowRole,
+              root.bounds == target.windowBounds else { return nil }
+        if let key = target.windowButtonAttribute {
+            guard data.subrole == target.windowButtonSubrole, prepare(target.window, deadline: deadline) else { return nil }
+            var current: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(target.window, key as CFString, &current) == .success,
+                  let current, CFEqual(current, target.element) else { return nil }
+        }
         let system = AXUIElementCreateSystemWide()
         validationFailure = "辅助位置未命中原按钮"
         // AX frames can include non-clickable bezel/focus padding. These are checks inside the

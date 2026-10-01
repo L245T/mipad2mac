@@ -203,7 +203,7 @@ struct SettingsDetail: View {
                         Spacer()
                         Text(app.output.buttonPreferences.radius == 0 ? "关闭" : "\(Int(app.output.buttonPreferences.radius))点")
                             .monospacedDigit().foregroundStyle(.secondary)
-                        ExplanationButton(text: "点按小按钮附近时，尝试点击范围内最近的可用按钮。范围按按钮边缘计算，单位为屏幕逻辑点；默认6点，0关闭。\n\n仅对能完整核对按钮信息的普通窗口生效。复杂网页或自绘界面可能无法识别；候选相近、查询不完整或按钮被遮挡时保留原始点按。\n\n文字和已命中的控件不会被吸附，窗口顶栏、绘画、拖动、滚动和长按右键不使用此范围。设置自动保存，与长按和双击防抖分别设置；调整后抬笔重新落下。", label: "笔尖模糊触控说明")
+                        ExplanationButton(text: "点按小按钮附近时，尝试点击范围内最近的可用按钮。范围按按钮边缘计算，单位为屏幕逻辑点；默认6点，0关闭。\n\n原生窗口的关闭、最小化和绿色按钮在浏览、指针及绘画模式中均可尝试，包括本软件窗口。只有系统提供可靠按钮位置时生效，不采用固定位置；自绘窗口按钮可能无法识别。\n\n普通内容小按钮仍需完整核对，绘画画布不吸附。文字和已命中的控件不吸附；顶栏拖动、滚动和长按右键保留原始位置。候选相近、查询失败、按钮隐藏或被遮挡时保留原始点按；窗口改变则取消点击。设置自动保存，与长按和双击防抖分别设置；调整后抬笔重新落下。", label: "笔尖模糊触控说明")
                     }
                     SettingsIntegerSlider(value: Binding(get: { app.output.buttonPreferences.radius }, set: { value in
                         model.act { app.output.changeButtonRadius(value) }

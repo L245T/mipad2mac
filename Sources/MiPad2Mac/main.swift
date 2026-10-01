@@ -683,7 +683,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
-if CommandLine.arguments.contains("--pointer-event-check") {
+if CommandLine.arguments.contains("--window-button-manual-fixture") {
+    let app = NSApplication.shared
+    let fixture = ManualWindowButtonFixture()
+    app.delegate = fixture
+    app.setActivationPolicy(.regular)
+    app.run()
+} else if CommandLine.arguments.contains("--window-button-event-check") {
+    let app = NSApplication.shared
+    let check = WindowButtonEventCheck()
+    app.delegate = check
+    app.setActivationPolicy(.regular)
+    app.run()
+} else if CommandLine.arguments.contains("--pointer-event-check") {
     let app = NSApplication.shared
     let check = PointerEventCheck()
     app.delegate = check
