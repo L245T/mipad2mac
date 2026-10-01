@@ -11,16 +11,35 @@ struct AppPenModesPage: View {
     @ObservedObject var model: SettingsPresentation
     @StateObject private var selection = AppPenModesSelection()
     private var profiles: [PenApplicationProfile] { model.app.output.configuredProfiles }
+    private var defaultMode: Binding<PenApplicationMode> {
+        Binding(get: { model.app.output.defaultApplicationMode }, set: { mode in
+            model.act {
+                model.app.output.setDefaultApplicationMode(mode)
+                model.app.refreshNavigationMenu()
+            }
+        })
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsSection {
+                SettingsPicker("默认模式", selection: defaultMode) {
+                    Text("浏览（推荐）").tag(PenApplicationMode.browse)
+                    Text("指针").tag(PenApplicationMode.pointer)
+                    Text("绘画").tag(PenApplicationMode.drawing)
+                }
+            } footer: {
+                Text("未设置应用例外时，使用此模式。更改后抬笔，再次落笔生效。")
+            }
+            Text("应用例外").font(.headline).padding(.horizontal, 10)
+            VStack(alignment: .leading, spacing: 8) {
             VStack(spacing: 0) {
-                Text("未设置的应用默认浏览。可为下列应用单独选择笔模式。")
+                Text("下列设置优先于默认模式。")
                     .font(.body).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 10)
                 Divider()
                 if profiles.isEmpty {
-                    Text("点按下方＋添加应用")
+                    Text("点按下方＋添加应用例外")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 80)
                 } else {
@@ -29,7 +48,7 @@ struct AppPenModesPage: View {
                             model.app.output.setApplicationProfileMode(mode, for: profile.bundleID, name: profile.name)
                             model.app.refreshNavigationMenu()
                         }
-                    }.frame(height: min(320, CGFloat(profiles.count) * 40))
+                    }.frame(height: min(320, profiles.reduce(CGFloat.zero) { $0 + ($1.scope == .photoshopVersions ? 52 : 40) }))
                 }
                 Divider()
                 HStack(spacing: 0) {
@@ -49,9 +68,15 @@ struct AppPenModesPage: View {
             }
             .background(Color(nsColor: Self.groupFill))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let family = profiles.first(where: { $0.scope == .photoshopVersions }), let description = family.scopeDescription {
+                Text("Photoshop兼容规则：" + description)
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
+            }
             HStack {
                 Spacer()
                 ExplanationButton(text: Self.modeHelp, label: "应用输入模式说明")
+            }
             }
         }
     }
@@ -63,7 +88,7 @@ struct AppPenModesPage: View {
     private func addApplication() {
         guard model.app.window.attachedSheet == nil else { return }
         let panel = NSOpenPanel()
-        panel.title = "添加应用输入模式"; panel.prompt = "添加"
+        panel.title = "添加应用例外"; panel.prompt = "添加"
         panel.allowedContentTypes = [.applicationBundle]
         panel.canChooseFiles = true; panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -82,7 +107,7 @@ struct AppPenModesPage: View {
             }
         }
     }
-    static let modeHelp = "浏览：滑动滚动，轻点单击；双击或三击后，按住最后一下拖动选字。同次拖选不滚动、不触发长按右键。默认使用浏览，无需逐次开启或逐个添加应用。\n\n已识别的顶栏、工具栏和输入控件保留普通操作；未知普通内容可滚动，窗口顶部保留拖动。未知输入框或自定义工具栏也可能滚动，需要普通拖动时可将该应用设为指针。桌面、浮层和无法确认普通应用窗口的区域不启用滚动。\n\n指针：轻点单击，按住移动拖动，连续点按可选字；静止长按按控制页的全局设置执行。\n\n绘画：即时落笔，不滚动、不触发长按及兼容右键；压力与倾斜遵循控制页开关。绘画前可用＋添加应用，再选择绘画。软件不会自动判断绘画用途；原有绘画例外保留。\n\n列表只显示你添加或调整过的应用，绘画模式排在前面。新添加默认浏览，重复添加保留原模式；选择自动保存，并与HID菜单同步。删除只移除此应用的笔模式设置，回到默认浏览，不卸载应用或删除右键兼容设置。"
+    static let modeHelp = "默认模式用于没有应用例外的应用，初始为浏览（推荐）。更改默认不会重写已有例外。\n\n浏览：滑动滚动，轻点单击；双击或三击后，按住最后一下拖动选字。同次拖选不滚动、不触发长按右键。已识别的顶栏、工具栏和输入控件保留普通操作；未知普通内容可滚动，窗口顶部保留拖动。未知输入框或自定义工具栏也可能滚动，需要普通拖动时可将该应用设为指针。桌面、浮层和无法确认普通应用窗口的区域不启用滚动。\n\n指针：轻点单击，按住移动拖动，连续点按可选字；静止长按按控制页的全局设置执行。\n\n绘画：即时落笔，不滚动、不触发长按及兼容右键；压力与倾斜遵循控制页开关。软件不会自动判断绘画用途。\n\n应用例外优先于默认，绘画模式排在前面。新添加采用当前默认，重复添加保留原模式；选择自动保存，并与HID菜单同步。删除例外后回到当前默认，不卸载应用或删除右键兼容设置。更改模式会结束当前接触及惯性，抬笔后再次落笔生效。\n\nPhotoshop兼容规则适用于所有版本，具体版本的明确例外优先。规则可以修改或删除；删除规则保留具体版本的例外。此项表示兼容范围，不表示已安装应用。"
 }
 
 /// AppKit owns selection, keyboard navigation and pop-up menus. Icons are cached per visible list.
@@ -105,7 +130,7 @@ struct AppPenModesList: NSViewRepresentable {
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.dataSource = context.coordinator; table.delegate = context.coordinator
         table.autoresizingMask = [.width]
-        table.setAccessibilityLabel("应用输入模式列表")
+        table.setAccessibilityLabel("应用例外列表")
         scroll.documentView = table
         context.coordinator.table = table
         return scroll
@@ -129,7 +154,9 @@ struct AppPenModesList: NSViewRepresentable {
                 let ids = Set(rows.map(\.bundleID))
                 icons = icons.filter { ids.contains($0.key) }
                 for row in rows where icons[row.bundleID] == nil {
-                    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: row.bundleID) {
+                    if row.scope == .photoshopVersions {
+                        icons[row.bundleID] = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "Photoshop所有版本兼容规则")
+                    } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: row.bundleID) {
                         icons[row.bundleID] = NSWorkspace.shared.icon(forFile: url.path)
                     } else {
                         icons[row.bundleID] = NSImage(systemSymbolName: "app", accessibilityDescription: nil)
@@ -143,6 +170,9 @@ struct AppPenModesList: NSViewRepresentable {
             updating = false
         }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            rows[row].scope == .photoshopVersions ? 52 : 40
+        }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             let profile = rows[row]
             let cell = NSTableCellView()
@@ -171,10 +201,23 @@ struct AppPenModesList: NSViewRepresentable {
                 icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
                 name.trailingAnchor.constraint(lessThanOrEqualTo: menu.leadingAnchor, constant: -12),
-                name.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 menu.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
                 menu.widthAnchor.constraint(equalToConstant: 76), menu.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
             ])
+            if profile.scope == .photoshopVersions {
+                let scope = NSTextField(labelWithString: "兼容规则 · 所有版本")
+                scope.font = .systemFont(ofSize: 11); scope.textColor = .secondaryLabelColor
+                scope.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(scope)
+                cell.toolTip = profile.scopeDescription
+                NSLayoutConstraint.activate([
+                    name.centerYAnchor.constraint(equalTo: cell.centerYAnchor, constant: -8),
+                    scope.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+                    scope.trailingAnchor.constraint(lessThanOrEqualTo: menu.leadingAnchor, constant: -12),
+                    scope.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2)
+                ])
+            } else {
+                name.centerYAnchor.constraint(equalTo: cell.centerYAnchor).isActive = true
+            }
             if row < rows.count - 1 {
                 let separator = NSBox()
                 separator.boxType = .separator
@@ -218,8 +261,8 @@ private struct AppPenModeActions: NSViewRepresentable {
             button.imagePosition = .imageOnly; button.imageScaling = .scaleNone
             button.symbolConfiguration = .init(pointSize: 12, weight: .regular)
             button.contentTintColor = .secondaryLabelColor
-            button.setAccessibilityLabel(index == 0 ? "添加应用" : "移除所选应用的笔模式设置")
-            button.toolTip = index == 0 ? "添加应用" : "移除所选应用的笔模式设置，不会卸载应用"
+            button.setAccessibilityLabel(index == 0 ? "添加应用例外" : "移除所选应用例外")
+            button.toolTip = index == 0 ? "添加应用例外" : "移除所选应用例外，恢复当前默认模式，不会卸载应用"
             button.tag = index; button.isEnabled = index == 0 || canRemove
             stack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalToConstant: 26).isActive = true

@@ -44,6 +44,7 @@ final class SettingsPresentation: ObservableObject {
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
             String(app.enabled), String(app.output.tabletEnabled), String(app.output.momentumEnabled), String(app.monitoring),
+            app.output.defaultApplicationMode.rawValue,
             app.output.configuredProfiles.map { "\($0.bundleID):\($0.name):\($0.mode.rawValue)" }.joined(separator: "|"),
             app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
