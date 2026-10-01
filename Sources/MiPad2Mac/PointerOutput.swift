@@ -82,7 +82,7 @@ final class PointerOutput {
         if selectedProfileID?.lowercased() == id {
             selectedProfileID = nil; selectedProfileName = nil
         }
-        longPressDiagnostic("已移除应用笔模式：\(id)；回到默认浏览，已结束当前接触")
+        longPressDiagnostic("已移除应用输入：\(id)；回到默认浏览，已结束当前接触")
     }
     func chooseNavigationApplication() {
         release()
