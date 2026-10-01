@@ -650,7 +650,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc func showWindow() {
         refreshPermissions()
-        if !permissionsReady || !startupCoordinator.notices.isEmpty { tabs.select(.permissions) }
+        if !permissionsReady { tabs.select(.permissions) }
         showSelectedPage()
         offerManualPenSelection()
     }

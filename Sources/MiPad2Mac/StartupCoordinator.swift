@@ -56,13 +56,13 @@ final class StartupCoordinator {
     private(set) var notices: [MigrationSelection] = []
     private(set) var initialized = false
     private(set) var source: StartupSource = .user
-    private(set) var presentation = StartupPresentation.decide(source: .user, silentLogin: true, hasMigrationNotice: false)
+    private(set) var presentation = StartupPresentation.decide(source: .user, hasMigrationNotice: false)
     private var validatedRestart: UpdateRestartContext?
     private var userOpenedWindow = false
     /// Updater connects after validating its transaction; called before any permission/notice presentation.
     var coreInitializationCompleted: ((LaunchSnapshot) -> Void)?
     var suppressPermissionPresentation: Bool {
-        !initialized || !notices.isEmpty || (!userOpenedWindow && presentation.suppressAutomaticPermissionWindow)
+        !initialized || (!userOpenedWindow && presentation.suppressAutomaticPermissionWindow)
     }
     /// 013 must validate nonce/path/version/publisher before supplying this context and connecting its receipt callback.
     func acceptValidatedUpdateRestart(_ context: UpdateRestartContext) {
@@ -78,7 +78,7 @@ final class StartupCoordinator {
         self.current = current
         source = validatedRestart.map(StartupSource.updater) ?? systemSource
         notices = MigrationNotices.prepare(current: current, trustedSource: validatedRestart?.source, history: &history, rules: rules)
-        presentation = StartupPresentation.decide(source: source, silentLogin: StartupPreferences.silentLogin(in: defaults), hasMigrationNotice: !notices.isEmpty)
+        presentation = StartupPresentation.decide(source: source, hasMigrationNotice: !notices.isEmpty)
         persist(); initialized = true
         coreInitializationCompleted?(current)
     }

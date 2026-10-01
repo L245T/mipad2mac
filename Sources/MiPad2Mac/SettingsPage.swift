@@ -13,7 +13,6 @@ final class SettingsPage: NSObject {
     let materialToggle = NativeToggle("侧栏透明磨砂")
     let closePicker = NSPopUpButton()
     let loginToggle = NativeToggle("登录 Mac 时自动启动")
-    let silentLoginToggle = NativeToggle("登录时不显示主窗口")
     let loginStatus = NativeLayout.text("")
     let loginError = NativeLayout.text("")
     var view: NSView!
@@ -25,8 +24,6 @@ final class SettingsPage: NSObject {
         closePicker.selectItem(at: CloseBehavior.current.rawValue)
         closePicker.target = self; closePicker.action = #selector(closeChanged)
         loginToggle.target = self; loginToggle.action = #selector(loginChanged)
-        silentLoginToggle.state = StartupPreferences.silentLogin(in: .standard) ? .on : .off
-        silentLoginToggle.target = self; silentLoginToggle.action = #selector(silentLoginChanged)
         view = NativeLayout.page([
             NativeLayout.text("外观与窗口", heading: true),
             NativeLayout.card([
@@ -37,8 +34,8 @@ final class SettingsPage: NSObject {
             ]),
             NativeLayout.text("启动", heading: true),
             NativeLayout.card([
-                loginToggle, loginStatus, loginError, NativeLayout.separator(), silentLoginToggle,
-                NativeLayout.note("登录启动留在菜单栏；手动打开仍显示窗口。新的权限变更说明会单独显示。"), NativeLayout.separator(),
+                loginToggle, loginStatus, loginError,
+                NativeLayout.note("登录启动留在菜单栏。主动打开时显示主窗口；缺少必要权限时进入权限检查页。"), NativeLayout.separator(),
                 SettingsRow("登录项管理", control: NativeLayout.row([NSButton(title: "系统设置…", target: self, action: #selector(openLoginSettings)), NSButton(title: "重新检查", target: self, action: #selector(refresh))]), help: "自启动发生在登录 macOS 后。建议将应用放入应用程序文件夹。若等待批准，请在系统设置 → 通用 → 登录项与扩展允许 MiPad2Mac。登录项许可与输入权限分别管理。")
             ])
         ])
@@ -66,9 +63,6 @@ final class SettingsPage: NSObject {
         case .notFound: loginStatus.stringValue = "自启动：系统未找到应用，请将应用放入“应用程序”后重试。"
         @unknown default: loginStatus.stringValue = "自启动：系统状态未知，请查看登录项设置。"
         }
-    }
-    @objc func silentLoginChanged() {
-        UserDefaults.standard.set(silentLoginToggle.state == .on, forKey: StartupPreferences.silentLoginKey)
     }
     @objc func loginChanged() {
         loginError.stringValue = ""

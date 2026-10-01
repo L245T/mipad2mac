@@ -12,26 +12,19 @@ public struct UpdateRestartContext: Equatable {
 public enum StartupSource: Equatable { case user, loginItem, updater(UpdateRestartContext) }
 public struct StartupPresentation: Equatable {
     public let showMainWindow: Bool
-    /// Render the notice in the main permission page, never a separate window.
+    /// A pending notice is available in the permission page; it never forces that page or a window open.
     public let showMigrationNotice: Bool
     public let suppressAutomaticPermissionWindow: Bool
     public func shouldSelectPermissions(permissionsReady: Bool) -> Bool {
-        showMigrationNotice || (showMainWindow && !permissionsReady)
+        showMainWindow && !permissionsReady
     }
-    public static func decide(source: StartupSource, silentLogin: Bool, hasMigrationNotice: Bool) -> Self {
-        if hasMigrationNotice { return Self(showMainWindow: true, showMigrationNotice: true, suppressAutomaticPermissionWindow: true) }
+    public static func decide(source: StartupSource, hasMigrationNotice: Bool) -> Self {
         switch source {
-        case .user: return Self(showMainWindow: true, showMigrationNotice: false, suppressAutomaticPermissionWindow: false)
-        case .loginItem: return Self(showMainWindow: !silentLogin, showMigrationNotice: false, suppressAutomaticPermissionWindow: true)
+        case .user: return Self(showMainWindow: true, showMigrationNotice: hasMigrationNotice, suppressAutomaticPermissionWindow: false)
+        case .loginItem: return Self(showMainWindow: false, showMigrationNotice: false, suppressAutomaticPermissionWindow: true)
         case .updater(let context):
-            return Self(showMainWindow: context.mainWindowWasVisible, showMigrationNotice: false,
+            return Self(showMainWindow: context.mainWindowWasVisible, showMigrationNotice: context.mainWindowWasVisible && hasMigrationNotice,
                         suppressAutomaticPermissionWindow: !context.mainWindowWasVisible)
         }
-    }
-}
-public enum StartupPreferences {
-    public static let silentLoginKey = "hideMainWindowOnLogin"
-    public static func silentLogin(in defaults: UserDefaults) -> Bool {
-        defaults.object(forKey: silentLoginKey) as? Bool ?? true
     }
 }

@@ -49,7 +49,7 @@ final class SettingsPresentation: ObservableObject {
             app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
-            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy), String(app.updateChecker.scheduler.state.active != nil)]
+            String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy), String(app.updateChecker.scheduler.state.active != nil)]
             + (app.monitoring ? [app.countsLabel.stringValue, app.sampleLabel.stringValue, app.packetLabel.stringValue, app.controlLabel.stringValue, app.testRecord.displayText] : [])
         let next = fields.joined(separator: "\u{1f}")
         if next != signature { signature = next; generation += 1 }
@@ -461,11 +461,10 @@ struct SettingsDetail: View {
             } header: { Text("外观与窗口") } footer: { footerNote("留在菜单栏时隐藏 Dock 图标，笔控制继续运行。") }
             SettingsSection {
                 Toggle("登录 Mac 时自动启动", isOn: Binding(get: { app.settingsPage.loginToggle.state == .on }, set: { value in model.act { app.settingsPage.loginToggle.state = value ? .on : .off; app.settingsPage.loginChanged() } }))
-                Toggle("登录时不显示主窗口", isOn: Binding(get: { app.settingsPage.silentLoginToggle.state == .on }, set: { value in model.act { app.settingsPage.silentLoginToggle.state = value ? .on : .off; app.settingsPage.silentLoginChanged() } }))
                 if !app.settingsPage.loginStatus.isHidden { Text(app.settingsPage.loginStatus.stringValue).foregroundStyle(.orange) }
                 if !app.settingsPage.loginError.stringValue.isEmpty { Text(app.settingsPage.loginError.stringValue).foregroundStyle(.red) }
                 LabeledContent("登录项管理") { Button("系统设置…") { app.settingsPage.openLoginSettings() }; Button("重新检查") { model.act { app.settingsPage.refresh() } } }
-            } header: { Text("启动") } footer: { footerNote("登录启动可留在菜单栏，手动打开仍显示窗口；需要重新授权时进入权限检查页。登录项待批准时，请在“通用 → 登录项与扩展”允许MiPad2Mac。") }
+            } header: { Text("启动") } footer: { footerNote("登录启动留在菜单栏。主动打开时显示主窗口；缺少必要权限时进入权限检查页。登录项待批准时，请在“通用 → 登录项与扩展”允许MiPad2Mac。") }
         }
     }
     private var about: some View {

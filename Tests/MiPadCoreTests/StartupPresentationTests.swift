@@ -3,43 +3,40 @@ import Testing
 @testable import MiPadCore
 
 struct StartupPresentationTests {
-    @Test func manualAlwaysVisibleAndLoginChoiceDoesNotAffectManual() {
-        for silent in [true, false] {
-            let decision = StartupPresentation.decide(source: .user, silentLogin: silent, hasMigrationNotice: false)
-            #expect(decision.showMainWindow && !decision.suppressAutomaticPermissionWindow)
+    @Test func manualOpenRoutesByPermissionInsteadOfPendingNotice() {
+        for notice in [false, true] {
+            let decision = StartupPresentation.decide(source: .user, hasMigrationNotice: notice)
+            #expect(decision.showMainWindow)
+            #expect(!decision.suppressAutomaticPermissionWindow)
+            #expect(decision.showMigrationNotice == notice)
+            #expect(decision.shouldSelectPermissions(permissionsReady: false))
+            #expect(!decision.shouldSelectPermissions(permissionsReady: true))
         }
     }
-    @Test func loginHidesOnlyWhenChosenAndNeverAddsPermissionPopup() {
-        let silent = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: false)
-        #expect(!silent.showMainWindow && silent.suppressAutomaticPermissionWindow)
-        let visible = StartupPresentation.decide(source: .loginItem, silentLogin: false, hasMigrationNotice: false)
-        #expect(visible.showMainWindow && visible.suppressAutomaticPermissionWindow)
+    @Test func loginAlwaysStaysSilentRegardlessOfNoticeOrPermission() {
+        for notice in [false, true] {
+            let decision = StartupPresentation.decide(source: .loginItem, hasMigrationNotice: notice)
+            #expect(!decision.showMainWindow)
+            #expect(!decision.showMigrationNotice)
+            #expect(decision.suppressAutomaticPermissionWindow)
+            for ready in [false, true] {
+                #expect(!decision.shouldSelectPermissions(permissionsReady: ready))
+            }
+        }
     }
-    @Test func updaterRestoresVisibilityAndMigrationIsSingleException() {
+    @Test func trustedUpdaterRestoresVisibilityWithoutMigrationOverride() {
         let source = LaunchSnapshot(version: "0.5.3", build: "24", profile: .localDevelopment, authorizationGeneration: 0, ruleGeneration: 1)
         for visible in [true, false] {
             let context = UpdateRestartContext(transactionID: UUID(), source: source, mainWindowWasVisible: visible)
-            #expect(StartupPresentation.decide(source: .updater(context), silentLogin: true, hasMigrationNotice: false).showMainWindow == visible)
-            let notice = StartupPresentation.decide(source: .updater(context), silentLogin: true, hasMigrationNotice: true)
-            #expect(notice.showMainWindow && notice.showMigrationNotice && notice.suppressAutomaticPermissionWindow)
+            for notice in [false, true] {
+                let decision = StartupPresentation.decide(source: .updater(context), hasMigrationNotice: notice)
+                #expect(decision.showMainWindow == visible)
+                #expect(decision.showMigrationNotice == (visible && notice))
+                #expect(decision.suppressAutomaticPermissionWindow == !visible)
+                for ready in [false, true] {
+                    #expect(decision.shouldSelectPermissions(permissionsReady: ready) == (visible && !ready))
+                }
+            }
         }
-        let loginNotice = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: true)
-        #expect(loginNotice.showMigrationNotice && loginNotice.showMainWindow)
-    }
-    @Test func missingPermissionsSelectExistingPageOnlyForVisibleStartup() {
-        let manual = StartupPresentation.decide(source: .user, silentLogin: true, hasMigrationNotice: false)
-        #expect(manual.shouldSelectPermissions(permissionsReady: false))
-        #expect(!manual.shouldSelectPermissions(permissionsReady: true))
-        let login = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: false)
-        #expect(!login.shouldSelectPermissions(permissionsReady: false))
-        let migration = StartupPresentation.decide(source: .loginItem, silentLogin: true, hasMigrationNotice: true)
-        #expect(migration.showMainWindow && migration.shouldSelectPermissions(permissionsReady: true))
-    }
-    @Test func silentPreferenceDefaultsOnAndRestoresWithoutRegisteringLogin() {
-        let suite = "MiPadStartupTests." + UUID().uuidString
-        let d = UserDefaults(suiteName: suite)!; defer { d.removePersistentDomain(forName: suite) }
-        #expect(StartupPreferences.silentLogin(in: d))
-        d.set(false, forKey: StartupPreferences.silentLoginKey)
-        #expect(!StartupPreferences.silentLogin(in: d))
     }
 }
