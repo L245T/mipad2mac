@@ -64,6 +64,7 @@ public struct LongPressGesture {
     public private(set) var deadline: TimeInterval?
     public var hasScheduledClick: Bool { deadline != nil }
     public var isIdle: Bool { phase == .idle }
+    public var isScrolling: Bool { phase == .scrolling }
     public var isPending: Bool { phase == .pending }
     public init() {}
 

@@ -19,7 +19,7 @@ final class SettingsPresentation: ObservableObject {
             app.settingsPage.loginStatus.stringValue, app.settingsPage.loginError.stringValue,
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
-            String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
+            String(app.enabled), String(app.output.tabletEnabled), String(app.output.momentumEnabled), String(app.monitoring),
             app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
@@ -169,11 +169,13 @@ struct SettingsDetail: View {
                 }.disabled(app.output.profileID == nil)
                 settingDescription(app.output.profileMode.explanation)
                 HStack { Spacer(); Button("添加或选择应用…") { model.act { app.output.chooseNavigationApplication() } } }
-                settingDescription("浏览模式持续生效，无需逐次开启。无法识别的内容默认滚动；需要普通拖动时，按住Option落笔。未知区域中的输入框也可能滚动，可用Option拖动或双击／三击拖选。")
+                settingDescription("浏览模式持续生效，无需逐次开启。无法识别的内容默认滚动；双击或三击后按住最后一下拖动可选字。未知输入框也可能滚动，需要普通拖动时可将此应用设为指针模式。")
             } header: { Text("应用笔设置") } footer: {
                 footerNote("设置按应用自动保存，也可从HID菜单切换。原“不使用长按右键”的应用已按绘画模式保留，在此统一调整。")
             }
             SettingsSection {
+                Toggle("惯性滚动", isOn: Binding(get: { app.output.momentumEnabled }, set: { value in model.act { app.output.momentumEnabled = value } }))
+                settingDescription("快速滑动后抬笔，内容继续滚动并逐渐停止；速度为主，笔压仅小幅调整距离。停稳再抬笔不继续滚动，再次落笔立即停止。设置自动保存。")
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
                 }.accessibilityLabel("压力与倾斜")

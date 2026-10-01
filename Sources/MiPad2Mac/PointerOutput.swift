@@ -30,7 +30,16 @@ final class PointerOutput {
     private var nextWindowValidation: TimeInterval = 0
     private let diagnosticOwnWindow: Bool
     private let diagnosticHitUnavailable: () -> Bool
-    private let modifierState: () -> CGEventFlags
+    let momentumPreferences: ScrollMomentumPreferences
+    private var momentum = PenScrollMomentum()
+    private var momentumTimer: Timer?
+    private var scrollWindow: ScrollWindow?
+    private var momentumWindow: ScrollWindow?
+    var momentumActive: Bool { momentum.isCoasting }
+    var momentumEnabled: Bool {
+        get { momentumPreferences.enabled }
+        set { release(); momentumPreferences.enabled = newValue }
+    }
 
     var profileID: String? { (selectedProfileID ?? lastExternalApplication?.bundleIdentifier)?.lowercased() }
     var profileName: String { selectedProfileName ?? lastExternalApplication?.localizedName ?? "请先选择应用" }
@@ -85,12 +94,11 @@ final class PointerOutput {
 
     init(defaults: UserDefaults = .standard, observeApplications: Bool = true,
          diagnosticOwnWindow: Bool = false,
-         diagnosticHitUnavailable: @escaping () -> Bool = { false },
-         modifierState: @escaping () -> CGEventFlags = { CGEventSource.flagsState(.combinedSessionState) }) {
+         diagnosticHitUnavailable: @escaping () -> Bool = { false }) {
         // Only the explicit, isolated local-event diagnostic can scroll its own receiver window.
         self.diagnosticOwnWindow = diagnosticOwnWindow && !observeApplications
         self.diagnosticHitUnavailable = diagnosticOwnWindow && !observeApplications ? diagnosticHitUnavailable : { false }
-        self.modifierState = modifierState
+        momentumPreferences = ScrollMomentumPreferences(defaults: defaults)
         longPress = LongPressPreferences(defaults: defaults)
         navigation = PenNavigationPreferences(defaults: defaults)
         applicationProfiles = PenApplicationPreferences(defaults: defaults)
@@ -118,7 +126,7 @@ final class PointerOutput {
         }
     }
     deinit {
-        longPressTimer?.invalidate()
+        longPressTimer?.invalidate(); momentumTimer?.invalidate()
         if let applicationObserver { NSWorkspace.shared.notificationCenter.removeObserver(applicationObserver) }
     }
     // AX hit testing identifies the application under the pen, including inactive windows.
@@ -279,14 +287,15 @@ final class PointerOutput {
     var lastWarpError: CGError = .success
     let source = CGEventSource(stateID: .privateState)
     func receive(_ sample: Sample) {
+        let now = ProcessInfo.processInfo.systemUptime
         currentSample = sample
         let contact = sample.touching && sample.inRange && !sample.eraser
+        if contact && momentum.isCoasting { stopMomentum() }
         if gesture.isIdle && contact && sample.positionValid {
-            contactStarted = ProcessInfo.processInfo.systemUptime
+            stopMomentum()
+            contactStarted = now
             pressLocation = mapping.point(x: sample.x, y: sample.y)
             let frontmost = NSWorkspace.shared.frontmostApplication
-            let modifiers = modifierState()
-            let directDrag = !modifiers.intersection([.maskAlternate, .maskCommand, .maskControl, .maskShift]).isEmpty
             let hit = (longPress.enabled || applicationProfiles.hasBrowseApplications) ? target(at: pressLocation) : nil
             let topWindow = (hit == nil || applicationProfiles.hasBrowseApplications) ? window(at: pressLocation) : nil
             let matchingHit = topWindow == nil || hit?.app?.processIdentifier == topWindow?.app.processIdentifier ? hit : nil
@@ -298,26 +307,27 @@ final class PointerOutput {
                 $0.layer == 0 && (diagnosticOwnWindow || $0.app.processIdentifier != ProcessInfo.processInfo.processIdentifier)
                     && UnknownBrowseArea.contains(pressLocation, in: $0.bounds)
             } ?? false
-            fallbackContact = appMode == .browse && !directDrag && unknown && fallbackEligible
+            fallbackContact = appMode == .browse && unknown && fallbackEligible
             fallbackWindow = fallbackContact ? topWindow : nil
             nextWindowValidation = 0
-            if fallbackContact { longPressDiagnostic("未知区域持续浏览：\(resolvedApp?.bundleIdentifier ?? "未知")；窗口顶部保留拖动，Option可普通拖动") }
+            if fallbackContact { longPressDiagnostic("未知区域持续浏览：\(resolvedApp?.bundleIdentifier ?? "未知")；窗口顶部保留拖动") }
             contactClickTolerance = appMode == .drawing ? 0 : clickPreferences.jitterTolerance
             candidateTarget = fallbackContact ? topWindow?.app.processIdentifier : targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
-            contactMode = appMode == .browse && !directDrag && (matchingHit?.region == .content || fallbackContact) ? .browse : .pointer
+            contactMode = appMode == .browse && (matchingHit?.region == .content || fallbackContact) ? .browse : .pointer
             // Second/third held taps retain selection, including unknown custom content.
             let multiTapSelection = contactMode == .browse
                 && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval,
                                    extraTolerance: contactClickTolerance) > 1
             if multiTapSelection { contactMode = .pointer }
+            scrollWindow = contactMode == .browse ? topWindow : nil
             if appMode == .browse {
                 let path = hit?.nodes.map { node in
                     node.role + (node.valueEditable.map { $0 ? "[可编辑]" : "[只读]" } ?? "")
                 }.joined(separator: " → ") ?? "无区域信息"
                 longPressDiagnostic("浏览区域判定：\(targetApp?.bundleIdentifier ?? "未知")；\(path)；\(hit?.endReason ?? "目标查询失败")；区域\(String(describing: hit?.region)) → \(contactMode.title)")
             }
-            deferredContact = !directDrag && longPress.enabled && appMode != .drawing && matchingHit?.region != .chrome && (!unknown || fallbackContact) && (targetApp != nil || fallbackContact) && !multiTapSelection
+            deferredContact = longPress.enabled && appMode != .drawing && matchingHit?.region != .chrome && (!unknown || fallbackContact) && (targetApp != nil || fallbackContact) && !multiTapSelection
             if multiTapSelection { longPressDiagnostic("连续点按：本次接触保持文字选择，不滚动、不触发长按右键") }
             compatibilityContact = deferredContact && longPress.compatibilityEnabled
                 && (targetApp?.bundleIdentifier.map { id in
@@ -339,7 +349,7 @@ final class PointerOutput {
         // A deferred tap is emitted on lift; retain the last actual contact's tablet fields.
         if !contact && gesture.isPending { currentSample = contactSample }
         let wasPending = gesture.isPending
-        let result = gesture.consumeNavigation(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
+        let result = gesture.consumeNavigation(sample, mapping: mapping, now: now,
                                      enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled,
                                      jitterFilter: longPress.jitterFilter, navigation: contactMode)
         let events = result.pointer
@@ -348,8 +358,18 @@ final class PointerOutput {
                 ? "长按取消：移动超出抖动过滤范围（\(longPress.jitterFilter.title)，\(longPress.jitterFilter.tolerance) 逻辑点），进入拖动"
                 : (!result.scroll.isEmpty ? "长按取消：已进入浏览滚动" : (events.contains { $0.action == .down } ? "长按结束：提前抬笔，转单击" : "长按取消：输入失效或离开范围")))
         }
-        // Scroll routing stays at the original content; the subsequent move follows the live pen.
+        if let begin = result.scroll.first(where: { $0.phase == .began }) {
+            momentum.start(anchor: begin.anchor, axis: begin.horizontal != 0 ? .horizontal : .vertical, now: contactStarted)
+        }
+        if contact && gesture.isScrolling && sample.positionValid {
+            momentum.record(mapping.point(x: sample.x, y: sample.y), pressure: Double(sample.pressure) / 8191, now: now)
+        }
+        // Direct scrolling ends before the separate native momentum phase begins.
         emitScroll(result.scroll)
+        if result.scroll.contains(where: { $0.phase == .ended }), sample.inRange, !sample.eraser {
+            beginMomentum(now: now)
+        }
+        if result.scroll.contains(where: { $0.phase == .cancelled }) { stopMomentum() }
         emit(events)
         if gesture.hasScheduledClick { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
@@ -359,6 +379,7 @@ final class PointerOutput {
         }
     }
     func release() {
+        stopMomentum()
         longPressTimer?.invalidate(); longPressTimer = nil
         let cancelled = gesture.cancelNavigation()
         emit(cancelled.pointer); emitScroll(cancelled.scroll)
@@ -368,7 +389,7 @@ final class PointerOutput {
         if inProximity { sendProximity(false, at: lastPoint) }
         currentSample = nil; contactSample = nil
         clicks.reset()
-        fallbackContact = false; fallbackWindow = nil
+        fallbackContact = false; fallbackWindow = nil; scrollWindow = nil
     }
     private func emitScroll(_ events: [PenScrollEvent]) {
         for event in events {
@@ -420,10 +441,55 @@ final class PointerOutput {
         scrollEventCount += 1
         if planned.phase == .began {
             scrollGestureCount += 1
-            longPressDiagnostic("浏览滚动开始：固定内容目标，光标跟随笔尖，纵向优先，无惯性")
+            longPressDiagnostic("浏览滚动开始：固定内容目标，光标跟随笔尖，纵向优先")
         }
         if ending { longPressDiagnostic("浏览滚动结束：\(planned.phase == .cancelled ? "已取消" : "抬笔")；未补发单击") }
         return true
+    }
+    private func beginMomentum(now: Double) {
+        guard let target = scrollWindow, target.layer == 0,
+              momentum.lift(now: now, enabled: momentumEnabled) else { _ = momentum.cancel(); return }
+        momentumWindow = target
+        guard validMomentumWindow() else { stopMomentum(notifyTarget: false); return }
+        longPressDiagnostic("惯性滚动开始：按速度与有限笔压调整，沿原内容位置减速")
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard self.validMomentumWindow() else {
+                self.longPressDiagnostic("惯性滚动停止：目标窗口改变或被遮挡")
+                self.stopMomentum(notifyTarget: false); return
+            }
+            if let event = self.momentum.tick(now: ProcessInfo.processInfo.systemUptime) {
+                if !self.sendMomentum(event) { self.stopMomentum(notifyTarget: false); return }
+            }
+            if !self.momentum.isCoasting { self.momentumTimer?.invalidate(); self.momentumTimer = nil; self.momentumWindow = nil }
+        }
+        momentumTimer = timer; RunLoop.main.add(timer, forMode: .common)
+    }
+    private func validMomentumWindow() -> Bool {
+        guard let expected = momentumWindow, let current = window(at: pressLocation) else { return false }
+        return current.id == expected.id && current.app.processIdentifier == expected.app.processIdentifier
+            && current.layer == 0 && current.bounds == expected.bounds
+    }
+    private func stopMomentum(notifyTarget: Bool = true) {
+        momentumTimer?.invalidate(); momentumTimer = nil
+        if let end = momentum.cancel(), notifyTarget && validMomentumWindow() { _ = sendMomentum(end) }
+        momentumWindow = nil
+    }
+    @discardableResult private func sendMomentum(_ planned: PenMomentumEvent) -> Bool {
+        guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                                  wheel1: planned.vertical, wheel2: planned.horizontal, wheel3: 0) else { return false }
+        // WindowServer may move the cursor to an injected scroll event's location.
+        let liveCursor = CGEvent(source: nil)?.location ?? lastPoint
+        event.location = planned.anchor
+        let phase: CGMomentumScrollPhase
+        switch planned.phase { case .began: phase = .begin; case .changed: phase = .continuous; case .ended: phase = .end }
+        event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: 0)
+        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(phase.rawValue))
+        event.post(tap: .cghidEventTap); didPost(); scrollEventCount += 1
+        // Restore the current position with a move only; never click or drag during a coast.
+        return send(.move, at: liveCursor)
     }
     private func sendProximity(_ entering: Bool, at point: CGPoint) {
         guard let event = CGEvent(source: source) else { return }

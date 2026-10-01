@@ -10,6 +10,10 @@ final class PointerTestView: NSView {
     var bridgeClicks = 0
     var bridgeScrolls = 0
     var receivedScrollFlags: [UInt64] = []
+    var receivedMomentumPhases: [Int64] = []
+    var receivedAppKitMomentumPhases: [UInt] = []
+    var receivedMomentumAnchors: [CGPoint] = []
+    var receivedMomentumAxes: [CGPoint] = []
     var receivedClickCounts: [Int] = []
     var receivedScrollPhases: [Int64] = []
     var receivedRightClicks = 0
@@ -92,9 +96,16 @@ final class PointerTestView: NSView {
         bridgeScrolls += 1
         if receivedScrollFlags.count < 200 { receivedScrollFlags.append(cg.flags.rawValue) }
         let phase = cg.getIntegerValueField(.scrollWheelEventScrollPhase)
+        let momentum = cg.getIntegerValueField(.scrollWheelEventMomentumPhase)
+        if momentum > 0 && receivedMomentumPhases.count < 512 {
+            receivedMomentumPhases.append(momentum)
+            receivedAppKitMomentumPhases.append(event.momentumPhase.rawValue)
+            receivedMomentumAnchors.append(cg.location)
+            receivedMomentumAxes.append(CGPoint(x: event.scrollingDeltaX, y: event.scrollingDeltaY))
+        }
         if receivedScrollPhases.count < 200 { receivedScrollPhases.append(phase) }
-        if phase != 2 || event.timestamp - lastScrollLog >= 0.5 {
-            record("本窗口收到浏览滚动：X \(event.scrollingDeltaX)，Y \(event.scrollingDeltaY)，阶段 \(event.phase.rawValue)")
+        if (momentum > 0 ? momentum != 2 : phase != 2) || event.timestamp - lastScrollLog >= 0.5 {
+            record("本窗口收到浏览滚动：X \(event.scrollingDeltaX)，Y \(event.scrollingDeltaY)，阶段 \(event.phase.rawValue)，惯性 \(event.momentumPhase.rawValue)")
             lastScrollLog = event.timestamp
         }
         needsDisplay = true

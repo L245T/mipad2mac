@@ -23,20 +23,21 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private var failures: [String] = []
     private var steps: [(Double, () -> Void)] = []
     private var checks: [String] = []
-    private var testModifiers: CGEventFlags = []
     private var fallbackDownBefore = 0
     private var fallbackScrollBefore = 0
     private var fallbackRightBefore = 0
     private var diagnosticMessages: [String] = []
     private var fallbackFrame = NSRect.zero
     private var hitUnavailable = false
+    private var momentumBefore = 0
+    private var coastCursor = CGPoint.zero
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         originalCursor = CGEvent(source: nil)?.location ?? .zero
         defaults = UserDefaults(suiteName: suite)!
         output = PointerOutput(defaults: defaults, observeApplications: false, diagnosticOwnWindow: true,
-                               diagnosticHitUnavailable: { [weak self] in self?.hitUnavailable ?? false },
-                               modifierState: { [weak self] in self?.testModifiers ?? [] })
+                               diagnosticHitUnavailable: { [weak self] in self?.hitUnavailable ?? false })
+        output.momentumEnabled = false
         output.longPress.enabled = false
         output.tabletEnabled = true
         let id = Bundle.main.bundleIdentifier ?? "org.mipad2mac.app"
@@ -269,7 +270,6 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.fallbackDownBefore = self.output.downCount
             self.fallbackScrollBefore = self.view.bridgeScrolls
             self.fallbackRightBefore = self.view.receivedRightClicks
-            self.testModifiers = []
             self.pen()
         }
         append(after: 0.04) { self.pen(0.5, 0.6) }
@@ -299,14 +299,6 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.output.release(); self.output.longPress.enabled = false
             self.fallbackDownBefore = self.output.downCount
             self.fallbackScrollBefore = self.view.bridgeScrolls
-            self.testModifiers = .maskAlternate; self.pen()
-        }
-        append(after: 0.04) {
-            self.testModifiers = []
-            self.pen(0.5, 0.6); self.pen(down: false)
-        }
-        append {
-            self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "Option落笔普通拖动，松开Option不会中途切换")
             self.output.release(); self.hitUnavailable = true
             self.fallbackScrollBefore = self.view.bridgeScrolls
             self.fallbackDownBefore = self.output.downCount
@@ -339,12 +331,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.output.release(); self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
             self.fallbackDownBefore = self.output.downCount
             self.fallbackScrollBefore = self.view.bridgeScrolls
-            self.testModifiers = [.maskAlternate, .maskCommand]
-            self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
-        }
-        append {
-            self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "修饰键组合保留原普通拖动")
-            self.output.release(); self.testModifiers = []
+            self.output.release()
             self.originalMapping = self.output.mapping; self.originalFrame = self.window.frame
             let screen = NSScreen.screens.first!.frame
             self.output.mapping = Mapping(bounds: CGRect(x: screen.minX, y: 0, width: screen.width, height: screen.height))
@@ -371,6 +358,86 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         }
         append {
             self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "普通指针应用不会因未知区域自动变滚动")
+            self.output.release(); self.hitUnavailable = false
+            self.view.setAccessibilityRole(.scrollArea)
+            self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
+            self.output.tabletEnabled = false; self.output.momentumEnabled = true
+            self.fallbackDownBefore = self.output.downCount
+            self.momentumBefore = self.view.receivedMomentumPhases.count
+            self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.55) }
+        append(after: 0.03) { self.pen(0.5, 0.68) }
+        append(after: 0.01) { self.pen(down: false); self.coastCursor = CGEvent(source: nil)?.location ?? .zero }
+        append(after: 0.08) {
+            let phases = Array(self.view.receivedMomentumPhases.dropFirst(self.momentumBefore))
+            self.check(self.output.momentumActive && phases.contains(1) && phases.contains(2), "已识别内容抬笔后惯性开始与继续实际到达")
+            self.check(self.view.receivedAppKitMomentumPhases.contains(NSEvent.Phase.began.rawValue), "目标收到AppKit惯性阶段")
+            let cursor = CGEvent(source: nil)?.location ?? .zero
+            self.check(hypot(cursor.x - self.coastCursor.x, cursor.y - self.coastCursor.y) < 2, "惯性期间不把光标拉回落笔锚点")
+            self.check(self.output.downCount == self.fallbackDownBefore, "惯性没有左键点击或文字拖选")
+        }
+        append(after: 3.1) {
+            self.check(!self.output.momentumActive && self.view.receivedMomentumPhases.last == 3, "惯性自然减速结束实际到达")
+            let expected = self.output.mapping.point(x: 0.5, y: 0.5)
+            self.check(self.view.receivedMomentumAnchors.dropFirst(self.momentumBefore).allSatisfy { hypot($0.x - expected.x, $0.y - expected.y) < 2 }, "惯性固定到原内容位置")
+            self.output.release(); self.hitUnavailable = true
+            self.momentumBefore = self.view.receivedMomentumPhases.count; self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.55) }
+        append(after: 0.03) { self.pen(0.5, 0.68) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.05) {
+            self.check(self.output.momentumActive && self.view.receivedMomentumPhases.count > self.momentumBefore, "未知区域抬笔后同样进入惯性")
+            self.fallbackDownBefore = self.output.downCount
+            self.pen(); self.pen(down: false)
+            self.check(!self.output.momentumActive, "再次落笔同步停止惯性提交")
+        }
+        // Already submitted WindowServer events may arrive asynchronously; measure after they drain.
+        append(after: 0.05) {
+            self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count
+        }
+        append(after: 0.1) {
+            self.check(!self.output.momentumActive && self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore, "打断后没有继续到达的惯性滚动帧")
+            self.check(self.output.downCount == self.fallbackDownBefore + 1, "打断惯性后轻点仍完整点击")
+            self.output.release(); self.fallbackFrame = self.window.frame; self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.55) }
+        append(after: 0.03) { self.pen(0.5, 0.68) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.05) { self.window.setFrameOrigin(NSPoint(x: self.fallbackFrame.minX + 30, y: self.fallbackFrame.minY)) }
+        append(after: 0.08) { self.momentumBefore = self.view.receivedMomentumPhases.count }
+        append(after: 0.1) {
+            self.check(!self.output.momentumActive && self.view.receivedMomentumPhases.count == self.momentumBefore, "窗口移动后停止惯性，不向旧区域继续滚动")
+            self.window.setFrame(self.fallbackFrame, display: true)
+        }
+        append {
+            self.output.release(); self.output.momentumEnabled = false
+            self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count; self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.55) }
+        append(after: 0.03) { self.pen(0.5, 0.68) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.08) {
+            self.check(!self.output.momentumActive && self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore, "关闭惯性恢复抬笔即停")
+            self.output.release(); self.output.momentumEnabled = true
+            self.momentumBefore = self.view.receivedMomentumPhases.count; self.pen()
+        }
+        append(after: 0.03) { self.pen(0.6, 0.5) }
+        append(after: 0.03) { self.pen(0.7, 0.5) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.08) {
+            let axes = Array(self.view.receivedMomentumAxes.dropFirst(self.momentumBefore))
+            self.check(self.output.momentumActive && axes.contains { $0.x != 0 } && axes.allSatisfy { $0.y == 0 }, "横向惯性只沿原横向滚动")
+            self.output.release(); self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count
+            self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.65) }
+        append(after: 0.12) { self.pen(0.5, 0.65) }
+        append(after: 0.12) { self.pen(0.5, 0.65) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.08) {
+            self.check(!self.output.momentumActive && self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore, "停稳后抬笔不产生惯性")
             self.finish()
         }
         runNext()
@@ -429,7 +496,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         output.release(); CGWarpMouseCursorPosition(originalCursor)
         defaults.removePersistentDomain(forName: suite)
         let result: [String: Any] = ["passed": blocked == nil && failures.isEmpty, "blocked": blocked ?? "", "checks": checks, "failures": failures,
-            "clickCounts": view.receivedClickCounts, "scrollPhases": view.receivedScrollPhases,
+            "clickCounts": view.receivedClickCounts, "scrollPhases": view.receivedScrollPhases, "momentumPhases": view.receivedMomentumPhases, "appKitMomentumPhases": view.receivedAppKitMomentumPhases,
             "rightClicks": view.receivedRightClicks, "tabletContacts": view.receivedTabletContacts,
             "textTrace": textView.trace, "textSelectionLocation": textView.selectedRange().location, "textSelectionLength": textView.selectedRange().length,
             "AXTrusted": AXIsProcessTrusted(), "postAccess": CGPreflightPostEventAccess(),
