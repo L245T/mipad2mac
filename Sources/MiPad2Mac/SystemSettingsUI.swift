@@ -164,27 +164,50 @@ struct SettingsDetail: View {
                         Text(app.output.profileApplications[id] ?? id).tag(id)
                     }
                 }
-                SettingsPicker("输入模式", selection: Binding(get: { app.output.profileMode }, set: { value in model.act { app.output.changeNavigation(value) } })) {
-                    ForEach(PenApplicationMode.allCases, id: \.rawValue) { Text($0.title).tag($0) }
-                }.disabled(app.output.profileID == nil)
-                settingDescription(app.output.profileMode.explanation)
+                HStack(spacing: 12) {
+                    SettingsPicker("输入模式", selection: Binding(get: { app.output.profileMode }, set: { value in model.act { app.output.changeNavigation(value) } })) {
+                        ForEach(PenApplicationMode.allCases, id: \.rawValue) { Text($0.title).tag($0) }
+                    }.disabled(app.output.profileID == nil)
+                    ExplanationButton(text: applicationModeHelp, label: "输入模式说明")
+                }
+                settingDescription(applicationModeSummary)
                 HStack { Spacer(); Button("添加或选择应用…") { model.act { app.output.chooseNavigationApplication() } } }
-                settingDescription("浏览模式持续生效，无需逐次开启。无法识别的内容默认滚动；双击或三击后按住最后一下拖动可选字。未知输入框也可能滚动，需要普通拖动时可将此应用设为指针模式。")
             } header: { Text("应用笔设置") } footer: {
-                footerNote("设置按应用自动保存，也可从HID菜单切换。原“不使用长按右键”的应用已按绘画模式保留，在此统一调整。")
+                footerNote("按应用自动保存，也可从HID菜单切换。绘画前请选择绘画模式。")
             }
             SettingsSection {
-                Toggle("惯性滚动", isOn: Binding(get: { app.output.momentumEnabled }, set: { value in model.act { app.output.momentumEnabled = value } }))
-                settingDescription("快速滑动后抬笔，内容继续滚动并逐渐停止；速度为主，笔压仅小幅调整距离。停稳再抬笔不继续滚动，再次落笔立即停止。设置自动保存。")
                 Toggle(isOn: Binding(get: { app.output.tabletEnabled }, set: { value in model.act { app.setTabletOutput(value) } })) {
                     Text("压力与倾斜"); settingDescription("向支持的绘画软件发送笔压与倾斜数据。")
                 }.accessibilityLabel("压力与倾斜")
                 HStack(spacing: 12) {
+                    Toggle("惯性滚动", isOn: Binding(get: { app.output.momentumEnabled }, set: { value in model.act { app.output.momentumEnabled = value } }))
+                    ExplanationButton(text: "仅用于浏览模式的滚动，对所有应用生效，默认开启并自动保存。\n\n快速滑动后抬笔，内容沿原方向继续滚动并逐渐停止。延续距离主要取决于速度，笔压仅小幅调整距离，不用于切换模式。\n\n停稳后抬笔不继续滚动；再次落笔、切换应用、目标失效或释放控制时停止。横向与纵向使用同一设置，不影响点击、拖选或绘画。", label: "惯性滚动说明")
+                }
+                settingDescription("浏览时抬笔继续滚动；停稳不续滚，再次落笔立即停止。")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("双击与三击防抖")
+                        Spacer()
+                        Text(clickJitterValueLabel).monospacedDigit().foregroundStyle(.secondary)
+                        ExplanationButton(text: "用于接续双击、三击，允许落笔位置稍有偏移和点按中轻微移动。0–18表示增加的容差，单位为逻辑点，默认中（4）。\n\n无（0）保留原判定：落笔间距小于5点，点按中移动小于4点。默认允许间距小于9点、移动小于8点；启用额外容差时，连续点击以第一下的位置为基准。\n\n数值越大，邻近点击越容易合并。不改变系统双击时间、鼠标移动、开始滚动的门槛或绘画输出。设置自动保存，与长按防抖分别设置；长按防抖只影响停笔等待右键。", label: "双击与三击防抖说明")
+                    }
+                    SettingsIntegerSlider(value: Binding(get: { app.output.clickPreferences.jitterTolerance }, set: { value in
+                        model.act { app.output.changeClickTolerance(value) }
+                    }), label: "双击与三击防抖")
+                    settingDescription("容忍连续点按的偏移；过大可能合并邻近点击。")
+                }
+                LabeledContent("虚拟按键") {
+                    Text("暂不支持").foregroundStyle(.secondary)
+                    ExplanationButton(text: "小米平板当前固件向Mac提供的笔数据不包含捏、双击或滑动笔杆等手势数据。硬件连接未提供这些数据，MiPad2Mac无法获取并适配为虚拟按键。", label: "虚拟按键暂不支持的原因")
+                }
+            } header: { Text("笔输入") } footer: { EmptyView() }
+            SettingsSection {
+                HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("长按右键")
-                        Button("遇到问题，无法触发？") {
-                            longPressHelpState.prepare(for: app.window)
-                            longPressHelpState.shown = true
+                        HStack(spacing: 12) {
+                            Button("遇到问题，无法触发？") { showLongPressHelp(section: 0) }
+                            Button("兼容设置…") { showLongPressHelp(section: 1) }
                         }.buttonStyle(.link).font(.callout)
                     }
                     Spacer()
@@ -205,30 +228,14 @@ struct SettingsDetail: View {
                         Text("长按防抖")
                         Spacer()
                         Text(jitterValueLabel).monospacedDigit().foregroundStyle(.secondary)
-                        ExplanationButton(text: "过滤长按时的笔尖抖动，可选择0–18的任一整数，单位为逻辑点，不改变长按等待时间。\n\n默认中（4），保留原有手感。无（0）不容忍实际位移，但完全静止仍可触发长按右键。\n\n设置自动保存；绘画模式不受影响。", label: "长按防抖说明")
+                        ExplanationButton(text: "用于等待长按右键时容忍笔尖抖动。数值越大，开始拖动前也需移动更远；不改变长按等待时间或双击、三击的位置容差。\n\n可选择0–18的任一整数，单位为逻辑点。\n\n默认中（4），保留原有手感。无（0）不容忍实际位移，但完全静止仍可触发长按右键。\n\n设置自动保存；绘画模式不受影响。", label: "长按防抖说明")
                     }
                     SettingsIntegerSlider(value: Binding(get: { app.output.longPress.jitterFilter.tolerance }, set: { value in
                         model.act { app.output.changeLongPress { $0.jitterFilter = LongPressJitterFilter(tolerance: value) } }
                     })).disabled(!app.output.longPress.enabled)
                     settingDescription("数值越大，越能容忍笔尖抖动；开始拖动也需移动更远。")
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        Text("连续点按防抖")
-                        Spacer()
-                        Text(clickJitterValueLabel).monospacedDigit().foregroundStyle(.secondary)
-                        ExplanationButton(text: "允许双击、三击的落笔位置稍有偏移，并放宽点按中轻微移动的判定。0–18表示增加的容差，单位为逻辑点，默认中（4）。\n\n无（0）保留原判定：落笔间距小于5点，点按中移动小于4点。默认允许间距小于9点、移动小于8点；启用额外容差时，连续点击以第一下的位置为基准。\n\n数值越大，邻近点击越容易合并。不改变系统双击时间、鼠标移动、开始滚动的门槛或绘画输出。设置自动保存，与长按防抖分开。", label: "连续点按防抖说明")
-                    }
-                    SettingsIntegerSlider(value: Binding(get: { app.output.clickPreferences.jitterTolerance }, set: { value in
-                        model.act { app.output.changeClickTolerance(value) }
-                    }), label: "连续点按防抖")
-                    settingDescription("放宽双击、三击的位置判定；数值较大时，邻近点击也更容易合并。")
-                }
-                LabeledContent("虚拟按键") {
-                    Text("暂不支持").foregroundStyle(.secondary)
-                    ExplanationButton(text: "小米平板当前固件向Mac提供的笔数据不包含捏、双击或滑动笔杆等手势数据。硬件连接未提供这些数据，MiPad2Mac无法获取并适配为虚拟按键。", label: "虚拟按键暂不支持的原因")
-                }
-            } header: { Text("笔输入") } footer: { EmptyView() }
+            } header: { Text("长按右键") } footer: { EmptyView() }
             SettingsSection("手指输入") {
                 LabeledContent("状态") {
                     Text("暂不支持").foregroundStyle(.secondary)
@@ -236,6 +243,22 @@ struct SettingsDetail: View {
                 }
             }
         }
+    }
+    private var applicationModeSummary: String {
+        guard app.output.profileID != nil else { return "选择应用后，可分别设置指针、浏览或绘画模式。" }
+        switch app.output.profileMode {
+        case .pointer: return "拖动、选字和点击；静止长按可触发右键。"
+        case .browse: return "滑动滚动；双击或三击后，按住最后一下拖动选字。"
+        case .drawing: return "即时落笔；不滚动、不触发长按右键。"
+        }
+    }
+    private var applicationModeHelp: String {
+        "指针：轻点单击，按住移动拖动，连续点按可选字；静止长按按全局设置执行。\n\n浏览：滑动滚动，轻点单击；双击或三击后，按住最后一下拖动选字。同次拖选不滚动、不触发长按右键。浏览持续生效，无需逐次开启。\n\n已识别的顶栏、工具栏和输入控件保留普通操作；未知普通内容默认滚动，窗口顶部保留拖动。未知输入框或自定义工具栏也可能滚动，需要普通拖动时请将此应用设为指针模式。\n\n绘画：即时落笔，不滚动、不触发长按及兼容右键；压力与倾斜遵循全局开关。原长按排除应用已按绘画保留，可在此调整。\n\n未知应用默认指针，不会自动判断绘画用途；选择按应用保存。"
+    }
+    private func showLongPressHelp(section: Int) {
+        longPressHelpState.prepare(for: app.window)
+        longPressHelpState.section = section
+        longPressHelpState.shown = true
     }
     private var jitterValueLabel: String {
         let level = app.output.longPress.jitterFilter
@@ -290,14 +313,14 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 DisclosureGroup {
-                    settingDescription("先开启 MiPad2Mac 控制和长按右键。进入拖动后，本次接触不再触发右键。应用笔设置为绘画模式时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
+                    settingDescription("先开启MiPad2Mac控制和长按右键。进入拖动后，本次接触不再触发右键。应用笔设置为绘画模式时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
                 } label: {
                     Text("1. 确认长按条件").font(.headline)
                 }.disclosureGroupStyle(HelpDisclosureStyle(summary: "笔尖停住，等到设定时间；先在桌面试一次。"))
             }
             SettingsSection {
                 DisclosureGroup {
-                    settingDescription("用鼠标右键或触控板双指点按对照。CrxMouse 等扩展可能拦截首次右键；可临时停用扩展验证，或关闭扩展的右键菜单拦截。")
+                    settingDescription("用鼠标右键或触控板双指点按对照。CrxMouse等扩展可能拦截首次右键；可临时停用扩展验证，或关闭扩展的右键菜单拦截。")
                 } label: {
                     Text("2. 仅浏览器不响应？").font(.headline)
                 }.disclosureGroupStyle(HelpDisclosureStyle(summary: "检查鼠标手势扩展；需要时使用兼容设置。", compatibilityAction: { longPressHelpState.section = 1 }))
