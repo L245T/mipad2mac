@@ -356,7 +356,7 @@ final class PointerOutput {
             deferredContact = longPress.enabled && appMode != .drawing && matchingHit?.region != .chrome && (!unknown || fallbackContact) && (targetApp != nil || fallbackContact) && !multiTapSelection
             if multiTapSelection { longPressDiagnostic("连续点按：本次接触保持文字选择，不滚动、不触发长按右键") }
             compatibilityContact = deferredContact && longPress.compatibilityEnabled
-                && (targetApp?.bundleIdentifier.map { id in
+                && (resolvedApp?.bundleIdentifier.map { id in
                     longPress.compatibilityApplications.keys.contains { $0.caseInsensitiveCompare(id) == .orderedSame }
                 } ?? false)
             if longPress.enabled {
@@ -434,18 +434,19 @@ final class PointerOutput {
             && current.layer == 0 && current.bounds == expected.bounds
     }
     @discardableResult private func sendScroll(_ planned: PenScrollEvent) -> Bool {
-        if fallbackContact {
-            let now = ProcessInfo.processInfo.systemUptime
-            if planned.phase != .changed || now >= nextWindowValidation {
-                guard let expected = fallbackWindow, let current = window(at: planned.anchor),
-                      current.id == expected.id, current.app.processIdentifier == expected.app.processIdentifier,
-                      current.layer == 0, current.bounds == expected.bounds else {
-                    postedScrollAnchor = nil
-                    longPressDiagnostic("未知区域滚动已取消：目标窗口改变或被遮挡")
-                    return false
-                }
-                nextWindowValidation = now + 0.05
+        // Identified content and unknown content must both stay in the original real window.
+        let now = ProcessInfo.processInfo.systemUptime
+        if planned.phase != .changed || now >= nextWindowValidation {
+            let expected = scrollWindow, current = window(at: planned.anchor)
+            guard let expected, let current,
+                  current.id == expected.id, current.app.processIdentifier == expected.app.processIdentifier,
+                  current.layer == 0, current.bounds == expected.bounds else {
+                postedScrollAnchor = nil
+                longPressDiagnostic("浏览滚动已取消：目标窗口改变或被遮挡")
+                longPressDiagnostic("窗口核对：原ID \(expected?.id.description ?? "无")／\(String(describing: expected?.bounds))；现ID \(current?.id.description ?? "无")／\(String(describing: current?.bounds))")
+                return false
             }
+            nextWindowValidation = now + 0.05
         }
         guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
                                  wheel1: planned.vertical, wheel2: planned.horizontal, wheel3: 0) else { return false }

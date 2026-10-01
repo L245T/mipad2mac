@@ -67,7 +67,8 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             print(message)
             if self?.diagnosticMessages.count ?? 200 < 200 { self?.diagnosticMessages.append(message) }
         }
-        append {
+        // The native show animation briefly changes WindowServer bounds; start after it settles.
+        append(after: 0.6) {
             self.check(self.output.configuredProfiles.isEmpty, "零应用配置不自动登记当前窗口或内置绘画例外")
             self.pen()
         }
@@ -175,6 +176,9 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.output.mapping = self.originalMapping
             self.output.release(); self.output.longPress.enabled = false
             self.view.addSubview(self.leftScroll); self.view.addSubview(self.rightScroll)
+        }
+        // A restored AppKit frame reaches WindowServer asynchronously.
+        append(after: 0.08) {
             self.pen(0.15, 0.3)
         }
         append { self.pen(0.15, 0.4) }
@@ -514,6 +518,55 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: 0.1) {
             self.check(self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore,
                        "删除配置后系统队列排空，无继续到达的惯性帧")
+            self.output.momentumEnabled = false
+            self.output.changeLongPress {
+                $0.enabled = true; $0.compatibilityEnabled = true
+                $0.compatibilityApplications = [id.uppercased(): "本地事件验收"]
+            }
+            self.fallbackRightBefore = self.view.receivedRightClicks
+            self.pen()
+        }
+        append(after: 0.8) { self.pen(down: false) }
+        append {
+            self.check(self.view.receivedRightClicks == self.fallbackRightBefore + 2,
+                       "AX完全不可用时按真实窗口应用匹配名单，收到两次完整兼容右键")
+            self.output.changeLongPress { $0.compatibilityApplications = ["com.example.other": "Other"] }
+            self.fallbackRightBefore = self.view.receivedRightClicks
+            self.pen()
+        }
+        append(after: 0.8) { self.pen(down: false) }
+        append {
+            self.check(self.view.receivedRightClicks == self.fallbackRightBefore + 1,
+                       "AX不可用且应用不在兼容名单时仍只发送一次右键")
+            self.output.changeLongPress { $0.compatibilityApplications = [id: "本地事件验收"] }
+            self.output.setApplicationProfileMode(.drawing, for: id, name: "本地事件验收")
+            self.fallbackRightBefore = self.view.receivedRightClicks; self.profileDownBefore = self.output.downCount
+            self.pen()
+        }
+        append(after: 0.8) { self.pen(0.55, 0.55); self.pen(down: false) }
+        append {
+            self.check(self.view.receivedRightClicks == self.fallbackRightBefore && self.output.downCount == self.profileDownBefore + 1,
+                       "AX不可用且在兼容名单的绘画应用仍即时落笔、不触发右键")
+            self.output.removeApplicationProfile(bundleID: id)
+            self.output.changeLongPress { $0.enabled = false }
+            self.hitUnavailable = false
+            self.fallbackFrame = self.window.frame
+            self.pen()
+        }
+        append(after: 0.04) { self.pen(0.5, 0.6) }
+        append(after: 0.08) {
+            self.profileScrollBefore = self.output.scrollEventCount; self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.window.setFrameOrigin(NSPoint(x: self.fallbackFrame.minX + 30, y: self.fallbackFrame.minY))
+        }
+        append(after: 0.08) {
+            self.pen(0.5, 0.65)
+        }
+        append(after: 0.08) { self.pen(0.5, 0.7); self.pen(down: false) }
+        append {
+            print("已识别滚动移窗计数：提交 \(self.profileScrollBefore)→\(self.output.scrollEventCount)，接收 \(self.fallbackScrollBefore)→\(self.view.bridgeScrolls)")
+            self.check(self.output.scrollEventCount == self.profileScrollBefore && self.view.bridgeScrolls == self.fallbackScrollBefore,
+                       "已识别内容的窗口移动后同样取消直接滚动，不向旧锚点投递")
+            self.window.setFrame(self.fallbackFrame, display: true)
             self.finish()
         }
         runNext()
