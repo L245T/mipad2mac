@@ -29,8 +29,8 @@ enum CurrentReleaseIdentity {
 }
 
 enum MigrationCatalog {
-    // Release owner fills the actual first release version here. Do not activate through network text or guessed versions.
-    static let developerIDIntroducedIn: String? = nil
+    // First Developer ID version containing this startup flow; never activated by network text.
+    static let developerIDIntroducedIn: String? = "1.0.0"
     static var rules: [MigrationRule] {
         [MigrationRule(id: "permission-identity-migration-1", introducedIn: developerIDIntroducedIn,
             sourceProfiles: [.localDevelopment], targetProfile: .developerID, targetGeneration: 1,

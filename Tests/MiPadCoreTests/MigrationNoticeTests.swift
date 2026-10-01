@@ -3,6 +3,26 @@ import Testing
 @testable import MiPadCore
 
 struct MigrationNoticeTests {
+    @Test func firstFormalVersionKeepsIdentityNoticeStable() throws {
+        let first = MigrationRule(id: "permission-identity-migration-1", introducedIn: "1.0.0",
+            sourceProfiles: [.localDevelopment], targetProfile: .developerID, targetGeneration: 1,
+            cause: "test", capabilities: PermissionCapability.allCases, explainUnknownSource: true)
+        var before = MigrationHistory()
+        #expect(MigrationNotices.prepare(current: snapshot("0.5.3"), history: &before, rules: [first]).isEmpty)
+        for previous in [snapshot("0.5.3", .localDevelopment, generation: 0), snapshot("0.5.3"), nil] {
+            var h = MigrationHistory(); h.lastSuccessfulLaunch = previous
+            let selected = MigrationNotices.prepare(current: snapshot("1.0.0"), history: &h, rules: [first])
+            if previous?.profile == .developerID {
+                #expect(selected.isEmpty)
+            } else {
+                #expect(selected.count == 1)
+                #expect(selected.first?.unknownSource == (previous == nil))
+                MigrationNotices.acknowledge(selected, history: &h)
+            }
+            var restored = MigrationHistory.decode(try JSONEncoder().encode(h))
+            #expect(MigrationNotices.prepare(current: snapshot("1.0.1"), history: &restored, rules: [first]).isEmpty)
+        }
+    }
     func snapshot(_ version: String = "0.7.0", _ profile: ReleaseProfile = .developerID, generation: Int = 1) -> LaunchSnapshot {
         LaunchSnapshot(version: version, build: "24", profile: profile, authorizationGeneration: generation, ruleGeneration: 1)
     }

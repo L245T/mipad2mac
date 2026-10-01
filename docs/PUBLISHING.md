@@ -39,7 +39,7 @@ App 保留 `CFBundleShortVersionString` 与原生数字构建号 `CFBundleVersio
 
 `scripts/source-revision.py` 与 `scripts/build-revision.py` 只作包外校验。前者计算 Package.swift、Swift 源码及应用图片的内容摘要；后者逐项比较实际输入和干净的公开参考仓库 HEAD。二者均不是二进制可复现性证明，也不能单独证明提交已经推送。
 
-正式发布顺序：测试 → 本地提交 → 审查同步公开仓库并提交推送 → 核对远端及打包输入 → 构建 App 和 DMG → 验证后创建正式 Release。开发与公开历史分离时：
+正式发布顺序：测试 → 本地提交 → 审查同步公开仓库并提交推送 → 核对远端及打包输入 → 构建App及DMG并完成所选发行路径的验证 → 获授权后创建正式Release。开发与公开历史分离时：
 
 ```sh
 MIPAD_REVISION_REPO=/path/to/public-checkout MIPAD_REQUIRE_GIT_REVISION=1 bash scripts/build-dmg.sh
@@ -84,3 +84,7 @@ MIPAD_DMGBUILD="$PWD/.build/dmg-tools/bin/dmgbuild" bash scripts/build-dmg.sh
 可用 `MIPAD_INSTALL_NOTES_FILE` 提供已审核的安装说明。说明必须符合当前包的真实验证状态，不从旧 Release 复制安全提示或发行结论。若后续还有会修改包字节的步骤，使用 `MIPAD_DEFER_CHECKSUM=1`，全部完成后再生成最终 SHA-256；中间产物不能作为最终分发包。
 
 版本提交、源码推送和本地验证不代表 GitHub Release 已更新。各历史附件的状态以对应 Release 为准。
+
+## 1.0.0版本准备
+
+本轮将此前未发布改动归入1.0.0／构建25，仅同步公开源码和准备本地分发产物，不创建标签或GitHub Release、不更新历史附件。应用更新检查不会因源码版本变化而发现1.0.0。后续界面与文案调整需重新构建对应产物，旧包的验证结果不能套用于修改后的包。
