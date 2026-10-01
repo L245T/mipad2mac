@@ -12,34 +12,53 @@ struct AppPenModesPage: View {
     @StateObject private var selection = AppPenModesSelection()
     private var profiles: [PenApplicationProfile] { model.app.output.configuredProfiles }
     var body: some View {
-        SettingsSection {
-            if profiles.isEmpty {
-                Text("尚未添加应用").foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 100)
-            } else {
-                AppPenModesList(profiles: profiles, selectedID: $selection.selectedID) { profile, mode in
-                    model.act {
-                        model.app.output.setApplicationProfileMode(mode, for: profile.bundleID, name: profile.name)
-                        model.app.refreshNavigationMenu()
-                    }
-                }.frame(height: min(288, CGFloat(profiles.count) * 36 + 4))
-            }
-            HStack(spacing: 8) {
-                AppPenModeActions(canRemove: selection.selectedID != nil && profiles.contains(where: { $0.bundleID == selection.selectedID }), add: addApplication) {
-                    guard let id = selection.selectedID else { return }
-                    model.act {
-                        model.app.output.removeApplicationProfile(bundleID: id)
-                        model.app.refreshNavigationMenu()
-                    }
-                    selection.selectedID = nil
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 0) {
+                Text("未设置的应用默认浏览。可为下列应用单独选择笔模式。")
+                    .font(.body).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 10)
+                Divider()
+                if profiles.isEmpty {
+                    Text("点按下方＋添加应用")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 80)
+                } else {
+                    AppPenModesList(profiles: profiles, selectedID: $selection.selectedID) { profile, mode in
+                        model.act {
+                            model.app.output.setApplicationProfileMode(mode, for: profile.bundleID, name: profile.name)
+                            model.app.refreshNavigationMenu()
+                        }
+                    }.frame(height: min(320, CGFloat(profiles.count) * 40))
                 }
+                Divider()
+                HStack(spacing: 0) {
+                    AppPenModeActions(canRemove: selection.selectedID != nil && profiles.contains(where: { $0.bundleID == selection.selectedID }), add: addApplication) {
+                        guard let id = selection.selectedID else { return }
+                        model.act {
+                            model.app.output.removeApplicationProfile(bundleID: id)
+                            model.app.refreshNavigationMenu()
+                        }
+                        selection.selectedID = nil
+                    }.frame(width: 53, height: 24)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 1)
+                .frame(height: 24)
+                .background(Color(nsColor: .labelColor).opacity(0.025))
+            }
+            .background(Color(nsColor: Self.groupFill))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            HStack {
                 Spacer()
                 ExplanationButton(text: Self.modeHelp, label: "应用笔模式说明")
             }
-        } header: { Text("已设置的应用") } footer: {
-            Text("未设置的应用默认浏览，已有绘画例外保留。\n用＋添加应用并选择模式，更改自动保存。")
-                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+    }
+    private static let groupFill = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        return NSColor(white: dark ? (contrast ? 0.24 : 0.18) : (contrast ? 0.92 : 0.965), alpha: 1)
     }
     private func addApplication() {
         guard model.app.window.attachedSheet == nil else { return }
@@ -81,7 +100,7 @@ struct AppPenModesList: NSViewRepresentable {
         let column = NSTableColumn(identifier: .init("application"))
         table.addTableColumn(column); table.headerView = nil
         table.style = .plain; table.backgroundColor = .clear
-        table.rowHeight = 36; table.intercellSpacing = .zero
+        table.rowHeight = 40; table.intercellSpacing = .zero
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.dataSource = context.coordinator; table.delegate = context.coordinator
@@ -130,12 +149,12 @@ struct AppPenModesList: NSViewRepresentable {
             let icon = NSImageView(); icon.image = icons[profile.bundleID]
             icon.imageScaling = .scaleProportionallyUpOrDown
             let name = NSTextField(labelWithString: profile.name)
-            name.font = .systemFont(ofSize: 12)
+            name.font = .systemFont(ofSize: 13)
             name.lineBreakMode = .byTruncatingMiddle; name.toolTip = profile.name
             name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let menu = NSPopUpButton(frame: .zero, pullsDown: false)
-            menu.isBordered = false; menu.controlSize = .small
-            menu.font = .systemFont(ofSize: 12)
+            menu.isBordered = false; menu.controlSize = .regular
+            menu.font = .systemFont(ofSize: 13)
             for mode in PenApplicationMode.allCases {
                 let item = NSMenuItem(title: mode.title, action: nil, keyEquivalent: "")
                 item.representedObject = mode.rawValue; menu.menu?.addItem(item)
@@ -147,15 +166,27 @@ struct AppPenModesList: NSViewRepresentable {
             cell.imageView = icon; cell.textField = name
             for child in [icon, name, menu] { child.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(child) }
             NSLayoutConstraint.activate([
-                icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-                icon.widthAnchor.constraint(equalToConstant: 24), icon.heightAnchor.constraint(equalToConstant: 24),
+                icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
+                icon.widthAnchor.constraint(equalToConstant: 20), icon.heightAnchor.constraint(equalToConstant: 20),
                 icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+                name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
                 name.trailingAnchor.constraint(lessThanOrEqualTo: menu.leadingAnchor, constant: -12),
                 name.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                menu.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                menu.widthAnchor.constraint(equalToConstant: 72), menu.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+                menu.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
+                menu.widthAnchor.constraint(equalToConstant: 76), menu.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
             ])
+            if row < rows.count - 1 {
+                let separator = NSBox()
+                separator.boxType = .separator
+                separator.translatesAutoresizingMaskIntoConstraints = false
+                cell.addSubview(separator)
+                NSLayoutConstraint.activate([
+                    separator.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+                    separator.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
+                    separator.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
+                    separator.heightAnchor.constraint(equalToConstant: 1)
+                ])
+            }
             return cell
         }
         func tableViewSelectionDidChange(_ notification: Notification) {
@@ -172,40 +203,46 @@ struct AppPenModesList: NSViewRepresentable {
     }
 }
 
-/// One native momentary control keeps both actions equal-sized, including disabled state.
+/// Borderless native buttons sit in the group's continuous bottom action strip.
 private struct AppPenModeActions: NSViewRepresentable {
     let canRemove: Bool
     let add: () -> Void
     let remove: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSSegmentedControl {
-        let control = NSSegmentedControl()
-        control.segmentCount = 2; control.trackingMode = .momentary
-        control.segmentStyle = .rounded; control.controlSize = .small
+    func makeNSView(context: Context) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal; stack.spacing = 0; stack.alignment = .centerY
         for (index, symbol) in ["plus", "minus"].enumerated() {
-            control.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: index == 0 ? "添加应用" : "移除所选应用的笔模式设置"), forSegment: index)
-            control.setWidth(28, forSegment: index)
+            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!, target: context.coordinator, action: index == 0 ? #selector(Coordinator.addApplication(_:)) : #selector(Coordinator.removeApplication(_:)))
+            button.isBordered = false; button.controlSize = .small
+            button.imagePosition = .imageOnly; button.imageScaling = .scaleNone
+            button.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+            button.contentTintColor = .secondaryLabelColor
+            button.setAccessibilityLabel(index == 0 ? "添加应用" : "移除所选应用的笔模式设置")
+            button.toolTip = index == 0 ? "添加应用" : "移除所选应用的笔模式设置，不会卸载应用"
+            button.tag = index; button.isEnabled = index == 0 || canRemove
+            stack.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            if index == 0 {
+                let separator = NSBox(); separator.boxType = .separator
+                stack.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(equalToConstant: 1).isActive = true
+                separator.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            }
         }
-        control.setToolTip("添加应用", forSegment: 0)
-        control.setToolTip("移除所选应用的笔模式设置，不会卸载应用", forSegment: 1)
-        control.setEnabled(canRemove, forSegment: 1)
-        control.target = context.coordinator; control.action = #selector(Coordinator.performAction(_:))
-        control.setAccessibilityLabel("应用笔模式增删")
-        return control
+        return stack
     }
-    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+    func updateNSView(_ stack: NSStackView, context: Context) {
         context.coordinator.parent = self
-        if control.isEnabled(forSegment: 1) != canRemove { control.setEnabled(canRemove, forSegment: 1) }
-    }
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
-        nsView.intrinsicContentSize
+        if let button = stack.arrangedSubviews.last as? NSButton { button.isEnabled = canRemove }
     }
     final class Coordinator: NSObject {
         var parent: AppPenModeActions
         init(_ parent: AppPenModeActions) { self.parent = parent }
-        @objc func performAction(_ sender: NSSegmentedControl) {
-            if sender.selectedSegment == 0 { parent.add() }
-            else if sender.selectedSegment == 1 && parent.canRemove { parent.remove() }
+        @objc func addApplication(_ sender: NSButton) { parent.add() }
+        @objc func removeApplication(_ sender: NSButton) {
+            if parent.canRemove { parent.remove() }
         }
     }
 }
