@@ -59,7 +59,6 @@ struct AppPenModesPage: View {
                 }
             }
             Text("应用例外").font(.headline).padding(.horizontal, 10)
-            VStack(alignment: .leading, spacing: 8) {
             VStack(spacing: 0) {
                 Text("下列设置优先于默认模式。")
                     .font(.body).foregroundStyle(.secondary)
@@ -76,7 +75,7 @@ struct AppPenModesPage: View {
                             model.app.output.setApplicationProfileMode(mode, for: profile.bundleID, name: profile.name)
                             model.app.refreshNavigationMenu()
                         }
-                    }.frame(height: min(320, profiles.reduce(CGFloat.zero) { $0 + ($1.scope == .photoshopVersions ? 52 : 40) }))
+                    }.frame(height: min(320, CGFloat(profiles.count) * AppPenModesList.rowHeight))
                 }
                 Divider()
                 HStack(spacing: 0) {
@@ -96,12 +95,6 @@ struct AppPenModesPage: View {
             }
             .background(Color(nsColor: Self.groupFill))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            if let family = profiles.first(where: { $0.scope == .photoshopVersions }), let description = family.scopeDescription {
-                Text("Photoshop兼容规则：" + description)
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
-            }
-            }
         }
     }
     private static let groupFill = NSColor(name: nil) { appearance in
@@ -136,6 +129,7 @@ struct AppPenModesPage: View {
 
 /// AppKit owns selection, keyboard navigation and pop-up menus. Icons are cached per visible list.
 struct AppPenModesList: NSViewRepresentable {
+    static let rowHeight: CGFloat = 40
     let profiles: [PenApplicationProfile]
     @Binding var selectedID: String?
     let changeMode: (PenApplicationProfile, PenApplicationMode) -> Void
@@ -149,7 +143,7 @@ struct AppPenModesList: NSViewRepresentable {
         let column = NSTableColumn(identifier: .init("application"))
         table.addTableColumn(column); table.headerView = nil
         table.style = .plain; table.backgroundColor = .clear
-        table.rowHeight = 40; table.intercellSpacing = .zero
+        table.rowHeight = Self.rowHeight; table.intercellSpacing = .zero
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.dataSource = context.coordinator; table.delegate = context.coordinator
@@ -201,9 +195,6 @@ struct AppPenModesList: NSViewRepresentable {
             updating = false
         }
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
-        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-            rows[row].scope == .photoshopVersions ? 52 : 40
-        }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             let profile = rows[row]
             let displayName = profile.scope == .photoshopVersions ? PhotoshopRuleAppearance.title : profile.name
@@ -232,27 +223,17 @@ struct AppPenModesList: NSViewRepresentable {
                 icon.widthAnchor.constraint(equalToConstant: 20), icon.heightAnchor.constraint(equalToConstant: 20),
                 icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+                name.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 name.trailingAnchor.constraint(lessThanOrEqualTo: menu.leadingAnchor, constant: -12),
                 menu.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
                 menu.widthAnchor.constraint(equalToConstant: 76), menu.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
             ])
             if profile.scope == .photoshopVersions {
-                let scope = NSTextField(labelWithString: "兼容规则 · 所有版本")
-                scope.font = .systemFont(ofSize: 11); scope.textColor = .secondaryLabelColor
-                scope.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(scope)
                 let iconNote = familyIconSource.map { "图标取自本机的\($0)，仅用于识别此规则。" }
                     ?? "未找到本机Photoshop，显示兼容规则图标。"
                 cell.toolTip = [profile.scopeDescription, iconNote].compactMap { $0 }.joined(separator: "\n")
                 icon.setAccessibilityLabel("Photoshop所有版本兼容规则")
                 icon.toolTip = iconNote
-                NSLayoutConstraint.activate([
-                    name.centerYAnchor.constraint(equalTo: cell.centerYAnchor, constant: -8),
-                    scope.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-                    scope.trailingAnchor.constraint(lessThanOrEqualTo: menu.leadingAnchor, constant: -12),
-                    scope.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2)
-                ])
-            } else {
-                name.centerYAnchor.constraint(equalTo: cell.centerYAnchor).isActive = true
             }
             if row < rows.count - 1 {
                 let separator = NSBox()
