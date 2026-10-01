@@ -185,7 +185,7 @@ macOS27隔离预览已检查720×580内容区域、长名称截断与未安装�
 
 独立页面上方使用原生SettingsPicker显示“默认模式”，选项为浏览（推荐）、指针和绘画；Binding读取PointerOutput.defaultApplicationMode，修改调用setDefaultApplicationMode(_:)并刷新菜单。初始浏览，自动保存到penDefaultApplicationMode；SettingsPresentation刷新签名包含默认值，HID菜单改变默认后页面同步。说明明确“未设置应用例外时，使用此模式”，更改后抬笔再次落笔生效。下方名单标题为“应用例外”，提示“下列设置优先于默认模式”，保留原生逐行菜单、增删及排序。菜单和页面共用核心，不直接改写偏好或已有例外。
 
-configuredProfiles包含可编辑删除的Photoshop家族兼容规则；PenApplicationProfile.scope为application或photoshopVersions，scopeDescription说明所有版本范围与具体版本例外优先。家族行不查找已安装应用图标，使用square.stack规则图标及“兼容规则 · 所有版本”次行标记，52pt行高；普通应用仍为40pt、20pt原生图标。列表下方始终显示当前家族范围说明，删除家族后说明随之移除；该行不表示已安装App。删除家族只停止继承，保留具体版本明确记录。新添加采用当前默认，删除采用当前默认；模式变化先释放，抬笔后生效。
+configuredProfiles包含可编辑删除的Photoshop家族兼容规则；PenApplicationProfile.scope为application或photoshopVersions，scopeDescription说明所有版本范围与具体版本例外优先。家族行标题固定为“Adobe Photoshop”，不采用已保存的2026等具体版本名称；次行保留“兼容规则 · 所有版本”，52pt行高。通过NSWorkspace查询同Bundle ID的已注册Photoshop，核对实际.app和Bundle ID后借用原生图标；多个版本按CFBundleShortVersionString数值降序、相同版本按规范路径升序确定选择，不受系统返回顺序影响。没有有效应用时使用square.stack规则图标，悬停说明图标来源及仅用于识别规则。只读图标，不启动应用、不扫描全部应用；仅列表变化时解析并缓存。普通应用仍为40pt、20pt原生图标。列表下方始终显示当前家族范围说明，删除家族后说明随之移除；该行不表示已安装App。删除家族只停止继承，保留具体版本明确记录。新添加采用当前默认，删除采用当前默认；模式变化先释放，抬笔后生效。
 
 本轮macOS27隔离预览实际点选验证了默认下拉、生产菜单action的独立菜单副本、NSOpenPanel新增备忘录、逐行模式切换及删除。页面改默认后菜单状态同步，菜单改默认后页面同步；修改默认保留已存绘画例外。Photoshop家族规则删除后范围说明消失，其他例外保留。正常退出重开后恢复默认指针、备忘录绘画及家族删除状态；清空列表后添加入口可用、删除禁用。720×580内容区域已查看默认、家族范围、真实应用图标和空列表布局。预览使用独立偏好，不连接设备、不操作真实权限；UI验收候选为1.0.1／26，未安装、未公证。上述改动与重授权演示、系统文件窗格路由现归入1.0.2／构建27的重新打包范围，旧1.0.1公证结果不能套用。实体笔、macOS26及完整辅助显示变体仍待验证。
 

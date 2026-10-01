@@ -7,6 +7,29 @@ private final class AppPenModesSelection: ObservableObject {
     @Published var selectedID: String? = nil
 }
 
+/// The family borrows an installed application's icon, never its version-specific identity.
+enum PhotoshopRuleAppearance {
+    static let title = "Adobe Photoshop"
+    static func iconApplication() -> URL? {
+        let workspace = NSWorkspace.shared
+        let candidates = workspace.urlsForApplications(withBundleIdentifier: "com.adobe.Photoshop")
+            + workspace.urlsForApplications(withBundleIdentifier: "com.adobe.photoshop")
+        return preferredApplication(in: candidates)
+    }
+    static func preferredApplication(in urls: [URL]) -> URL? {
+        let candidates = Set(urls.map { $0.resolvingSymlinksInPath().standardizedFileURL }).compactMap { url -> (URL, String)? in
+            guard url.isFileURL, url.pathExtension.lowercased() == "app",
+                  FileManager.default.fileExists(atPath: url.path), let bundle = Bundle(url: url),
+                  bundle.bundleIdentifier?.lowercased() == "com.adobe.photoshop" else { return nil }
+            return (url, bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0")
+        }
+        return candidates.sorted {
+            let order = $0.1.compare($1.1, options: .numeric)
+            return order == .orderedSame ? $0.0.path < $1.0.path : order == .orderedDescending
+        }.first?.0
+    }
+}
+
 struct AppPenModesPage: View {
     @ObservedObject var model: SettingsPresentation
     @StateObject private var selection = AppPenModesSelection()
@@ -145,6 +168,7 @@ struct AppPenModesList: NSViewRepresentable {
         weak var table: NSTableView?
         private var rows: [PenApplicationProfile] = []
         private var icons: [String: NSImage] = [:]
+        private var familyIconSource: String?
         private var updating = false
         init(_ parent: AppPenModesList) { self.parent = parent }
         func update() {
@@ -156,7 +180,13 @@ struct AppPenModesList: NSViewRepresentable {
                 icons = icons.filter { ids.contains($0.key) }
                 for row in rows where icons[row.bundleID] == nil {
                     if row.scope == .photoshopVersions {
-                        icons[row.bundleID] = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "Photoshop所有版本兼容规则")
+                        if let url = PhotoshopRuleAppearance.iconApplication() {
+                            icons[row.bundleID] = NSWorkspace.shared.icon(forFile: url.path)
+                            familyIconSource = url.deletingPathExtension().lastPathComponent
+                        } else {
+                            icons[row.bundleID] = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "Photoshop所有版本兼容规则")
+                            familyIconSource = nil
+                        }
                     } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: row.bundleID) {
                         icons[row.bundleID] = NSWorkspace.shared.icon(forFile: url.path)
                     } else {
@@ -176,12 +206,13 @@ struct AppPenModesList: NSViewRepresentable {
         }
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             let profile = rows[row]
+            let displayName = profile.scope == .photoshopVersions ? PhotoshopRuleAppearance.title : profile.name
             let cell = NSTableCellView()
             let icon = NSImageView(); icon.image = icons[profile.bundleID]
             icon.imageScaling = .scaleProportionallyUpOrDown
-            let name = NSTextField(labelWithString: profile.name)
+            let name = NSTextField(labelWithString: displayName)
             name.font = .systemFont(ofSize: 13)
-            name.lineBreakMode = .byTruncatingMiddle; name.toolTip = profile.name
+            name.lineBreakMode = .byTruncatingMiddle; name.toolTip = displayName
             name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let menu = NSPopUpButton(frame: .zero, pullsDown: false)
             menu.isBordered = false; menu.controlSize = .regular
@@ -193,7 +224,7 @@ struct AppPenModesList: NSViewRepresentable {
             menu.selectItem(at: PenApplicationMode.allCases.firstIndex(of: profile.mode) ?? 1)
             menu.identifier = .init(profile.bundleID)
             menu.target = self; menu.action = #selector(modeChanged)
-            menu.setAccessibilityLabel(profile.name + "的输入模式")
+            menu.setAccessibilityLabel(displayName + (profile.scope == .photoshopVersions ? "所有版本兼容规则的输入模式" : "的输入模式"))
             cell.imageView = icon; cell.textField = name
             for child in [icon, name, menu] { child.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(child) }
             NSLayoutConstraint.activate([
@@ -209,7 +240,11 @@ struct AppPenModesList: NSViewRepresentable {
                 let scope = NSTextField(labelWithString: "兼容规则 · 所有版本")
                 scope.font = .systemFont(ofSize: 11); scope.textColor = .secondaryLabelColor
                 scope.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(scope)
-                cell.toolTip = profile.scopeDescription
+                let iconNote = familyIconSource.map { "图标取自本机的\($0)，仅用于识别此规则。" }
+                    ?? "未找到本机Photoshop，显示兼容规则图标。"
+                cell.toolTip = [profile.scopeDescription, iconNote].compactMap { $0 }.joined(separator: "\n")
+                icon.setAccessibilityLabel("Photoshop所有版本兼容规则")
+                icon.toolTip = iconNote
                 NSLayoutConstraint.activate([
                     name.centerYAnchor.constraint(equalTo: cell.centerYAnchor, constant: -8),
                     scope.leadingAnchor.constraint(equalTo: name.leadingAnchor),
