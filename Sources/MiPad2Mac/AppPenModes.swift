@@ -22,22 +22,17 @@ struct AppPenModesPage: View {
                         model.app.output.setApplicationProfileMode(mode, for: profile.bundleID, name: profile.name)
                         model.app.refreshNavigationMenu()
                     }
-                }.frame(height: min(384, CGFloat(profiles.count) * 48 + 8))
+                }.frame(height: min(288, CGFloat(profiles.count) * 36 + 4))
             }
             HStack(spacing: 8) {
-                Button(action: addApplication) { Image(systemName: "plus") }
-                    .help("添加应用").accessibilityLabel("添加应用")
-                Button {
+                AppPenModeActions(canRemove: selection.selectedID != nil && profiles.contains(where: { $0.bundleID == selection.selectedID }), add: addApplication) {
                     guard let id = selection.selectedID else { return }
                     model.act {
                         model.app.output.removeApplicationProfile(bundleID: id)
                         model.app.refreshNavigationMenu()
                     }
                     selection.selectedID = nil
-                } label: { Image(systemName: "minus") }
-                    .disabled(selection.selectedID == nil || !profiles.contains(where: { $0.bundleID == selection.selectedID }))
-                    .help("移除所选应用的笔模式设置，不会卸载应用")
-                    .accessibilityLabel("移除所选应用的笔模式设置")
+                }
                 Spacer()
                 ExplanationButton(text: Self.modeHelp, label: "应用笔模式说明")
             }
@@ -86,7 +81,7 @@ struct AppPenModesList: NSViewRepresentable {
         let column = NSTableColumn(identifier: .init("application"))
         table.addTableColumn(column); table.headerView = nil
         table.style = .plain; table.backgroundColor = .clear
-        table.rowHeight = 48; table.intercellSpacing = .zero
+        table.rowHeight = 36; table.intercellSpacing = .zero
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.dataSource = context.coordinator; table.delegate = context.coordinator
@@ -135,11 +130,12 @@ struct AppPenModesList: NSViewRepresentable {
             let icon = NSImageView(); icon.image = icons[profile.bundleID]
             icon.imageScaling = .scaleProportionallyUpOrDown
             let name = NSTextField(labelWithString: profile.name)
-            name.font = .systemFont(ofSize: NSFont.systemFontSize)
+            name.font = .systemFont(ofSize: 12)
             name.lineBreakMode = .byTruncatingMiddle; name.toolTip = profile.name
             name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let menu = NSPopUpButton(frame: .zero, pullsDown: false)
-            menu.isBordered = false; menu.controlSize = .regular
+            menu.isBordered = false; menu.controlSize = .small
+            menu.font = .systemFont(ofSize: 12)
             for mode in PenApplicationMode.allCases {
                 let item = NSMenuItem(title: mode.title, action: nil, keyEquivalent: "")
                 item.representedObject = mode.rawValue; menu.menu?.addItem(item)
@@ -152,13 +148,13 @@ struct AppPenModesList: NSViewRepresentable {
             for child in [icon, name, menu] { child.translatesAutoresizingMaskIntoConstraints = false; cell.addSubview(child) }
             NSLayoutConstraint.activate([
                 icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
-                icon.widthAnchor.constraint(equalToConstant: 32), icon.heightAnchor.constraint(equalToConstant: 32),
+                icon.widthAnchor.constraint(equalToConstant: 24), icon.heightAnchor.constraint(equalToConstant: 24),
                 icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+                name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
                 name.trailingAnchor.constraint(lessThanOrEqualTo: menu.leadingAnchor, constant: -12),
                 name.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 menu.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                menu.widthAnchor.constraint(equalToConstant: 84), menu.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+                menu.widthAnchor.constraint(equalToConstant: 72), menu.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
             ])
             return cell
         }
@@ -172,6 +168,44 @@ struct AppPenModesList: NSViewRepresentable {
                   let mode = PenApplicationMode(rawValue: raw) else { return }
             parent.selectedID = id
             parent.changeMode(profile, mode)
+        }
+    }
+}
+
+/// One native momentary control keeps both actions equal-sized, including disabled state.
+private struct AppPenModeActions: NSViewRepresentable {
+    let canRemove: Bool
+    let add: () -> Void
+    let remove: () -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl()
+        control.segmentCount = 2; control.trackingMode = .momentary
+        control.segmentStyle = .rounded; control.controlSize = .small
+        for (index, symbol) in ["plus", "minus"].enumerated() {
+            control.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: index == 0 ? "添加应用" : "移除所选应用的笔模式设置"), forSegment: index)
+            control.setWidth(28, forSegment: index)
+        }
+        control.setToolTip("添加应用", forSegment: 0)
+        control.setToolTip("移除所选应用的笔模式设置，不会卸载应用", forSegment: 1)
+        control.setEnabled(canRemove, forSegment: 1)
+        control.target = context.coordinator; control.action = #selector(Coordinator.performAction(_:))
+        control.setAccessibilityLabel("应用笔模式增删")
+        return control
+    }
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.parent = self
+        if control.isEnabled(forSegment: 1) != canRemove { control.setEnabled(canRemove, forSegment: 1) }
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
+        nsView.intrinsicContentSize
+    }
+    final class Coordinator: NSObject {
+        var parent: AppPenModeActions
+        init(_ parent: AppPenModeActions) { self.parent = parent }
+        @objc func performAction(_ sender: NSSegmentedControl) {
+            if sender.selectedSegment == 0 { parent.add() }
+            else if sender.selectedSegment == 1 && parent.canRemove { parent.remove() }
         }
     }
 }
