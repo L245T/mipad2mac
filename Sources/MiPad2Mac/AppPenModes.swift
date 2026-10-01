@@ -51,7 +51,7 @@ struct AppPenModesPage: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             HStack {
                 Spacer()
-                ExplanationButton(text: Self.modeHelp, label: "应用输入说明")
+                ExplanationButton(text: Self.modeHelp, label: "应用输入模式说明")
             }
         }
     }
@@ -63,7 +63,7 @@ struct AppPenModesPage: View {
     private func addApplication() {
         guard model.app.window.attachedSheet == nil else { return }
         let panel = NSOpenPanel()
-        panel.title = "添加应用输入"; panel.prompt = "添加"
+        panel.title = "添加应用输入模式"; panel.prompt = "添加"
         panel.allowedContentTypes = [.applicationBundle]
         panel.canChooseFiles = true; panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -105,7 +105,7 @@ struct AppPenModesList: NSViewRepresentable {
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.dataSource = context.coordinator; table.delegate = context.coordinator
         table.autoresizingMask = [.width]
-        table.setAccessibilityLabel("应用输入列表")
+        table.setAccessibilityLabel("应用输入模式列表")
         scroll.documentView = table
         context.coordinator.table = table
         return scroll

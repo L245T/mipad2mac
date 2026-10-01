@@ -7,7 +7,7 @@ enum SettingsDestination: Int, CaseIterable {
     var title: String {
         switch self {
         case .control: return "控制"
-        case .applicationModes: return "应用输入"
+        case .applicationModes: return "应用输入模式"
         case .permissions: return "权限检查"
         case .testing: return "测试"
         case .settings: return "设置"
@@ -313,7 +313,7 @@ struct SettingsDetail: View {
         Group {
             SettingsSection {
                 DisclosureGroup {
-                    settingDescription("先开启MiPad2Mac控制和长按右键。进入拖动后，本次接触不再触发右键。应用输入设为绘画时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
+                    settingDescription("先开启MiPad2Mac控制和长按右键。进入拖动后，本次接触不再触发右键。应用输入模式设为绘画时，不触发长按。窗口顶栏和工具栏保留即时点击与拖动。")
                 } label: {
                     Text("1. 确认长按条件").font(.headline)
                 }.disclosureGroupStyle(HelpDisclosureStyle(summary: "笔尖停住，等到设定时间；先在桌面试一次。"))
