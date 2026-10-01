@@ -46,7 +46,14 @@ final class PointerOutput {
     var profileName: String { selectedProfileName ?? lastExternalApplication?.localizedName ?? "请先选择应用" }
     var profileExcluded: Bool { profileMode == .drawing }
     var profileMode: PenApplicationMode { applicationProfiles.mode(for: profileID) }
-    /// The independent list never includes the foreground app or implicit built-in defaults.
+    var defaultApplicationMode: PenApplicationMode { applicationProfiles.defaultApplicationMode }
+    func setDefaultApplicationMode(_ mode: PenApplicationMode) {
+        guard mode != defaultApplicationMode else { return }
+        release()
+        applicationProfiles.defaultApplicationMode = mode
+        longPressDiagnostic("默认笔输入模式：\(mode.title)；已结束当前接触，抬笔后生效")
+    }
+    /// The list includes the visible compatibility family, never the foreground app automatically.
     var configuredProfiles: [PenApplicationProfile] { applicationProfiles.configuredApplications }
     var profileApplications: [String: String] {
         var apps = applicationProfiles.applications
@@ -72,7 +79,7 @@ final class PointerOutput {
         guard !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         release()
         applicationProfiles.set(mode, for: bundleID, name: name)
-        longPressDiagnostic("应用默认模式：\(name) → \(mode.title)；已结束当前接触")
+        longPressDiagnostic("应用例外模式：\(name) → \(mode.title)；已结束当前接触")
     }
     func removeApplicationProfile(bundleID: String) {
         let id = bundleID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -82,7 +89,7 @@ final class PointerOutput {
         if selectedProfileID?.lowercased() == id {
             selectedProfileID = nil; selectedProfileName = nil
         }
-        longPressDiagnostic("已移除应用输入模式：\(id)；回到默认浏览，已结束当前接触")
+        longPressDiagnostic("已移除应用例外：\(id)；回到默认\(defaultApplicationMode.title)，已结束当前接触")
     }
     func chooseNavigationApplication() {
         release()

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MiPadCore
 struct PenApplicationPreferencesTests {
-    @Test func emptyConfigurationBrowsesWithoutListingImplicitDefaults() throws {
+    @Test func emptyConfigurationBrowsesAndShowsCompatibilityFamily() throws {
         let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let profiles = PenApplicationPreferences(defaults: defaults)
@@ -10,7 +10,8 @@ struct PenApplicationPreferencesTests {
         #expect(profiles.mode(for: nil) == .pointer)
         #expect(profiles.mode(for: " \n ") == .pointer)
         #expect(profiles.mode(for: "com.adobe.Photoshop.2026") == .drawing)
-        #expect(profiles.configuredApplications.isEmpty)
+        #expect(profiles.configuredApplications.map(\.bundleID) == ["com.adobe.photoshop"])
+        #expect(profiles.configuredApplications.first?.scopeDescription != nil)
         #expect(!profiles.hasBrowseApplications) // input routing must not depend on this list
         #expect(defaults.object(forKey: "penApplicationInteractionModes") == nil)
         #expect(defaults.object(forKey: "penLongPressExcludedApps") == nil)
@@ -39,8 +40,8 @@ struct PenApplicationPreferencesTests {
         profiles.set(.pointer, for: "com.example.reader", name: "Reader")
         #expect(profiles.add(for: "Com.Example.Reader", name: "Reader renamed")?.mode == .pointer)
         let restored = PenApplicationPreferences(defaults: defaults)
-        #expect(restored.configuredApplications.count == 1)
-        #expect(restored.configuredApplications.first?.name == "Reader renamed")
+        #expect(restored.configuredApplications.count == 2)
+        #expect(restored.configuredApplications.first { $0.bundleID == "com.example.reader" }?.name == "Reader renamed")
         #expect(restored.mode(for: "COM.EXAMPLE.READER") == .pointer)
         #expect(profiles.add(for: "  ", name: "Invalid") == nil)
         // Adding a previously implicit application is an explicit new browse choice.
@@ -86,14 +87,14 @@ struct PenApplicationPreferencesTests {
         profiles.remove(for: "com.adobe.Photoshop.2026")
         #expect(PenApplicationPreferences(defaults: defaults).mode(for: "com.adobe.Photoshop.2026") == .browse)
         #expect(profiles.mode(for: "com.adobe.Photoshop.2025") == .drawing)
-        #expect(profiles.configuredApplications.isEmpty)
+        #expect(profiles.configuredApplications.map(\.bundleID) == ["com.adobe.photoshop"])
         #expect(defaults.object(forKey: "penLongPressExcludedApps") == nil)
-        // A stored family exclusion remains effective for siblings even when its own row is removed.
+        // Removing the visible family stops implicit inheritance; exact version choices remain.
         LongPressPreferences(defaults: defaults).exclusions = ["com.adobe.Photoshop": "Photoshop"]
         #expect(profiles.configuredApplications.count == 1)
         profiles.remove(for: "com.adobe.Photoshop")
         #expect(profiles.mode(for: "com.adobe.Photoshop") == .browse)
-        #expect(profiles.mode(for: "com.adobe.Photoshop.2025") == .drawing)
+        #expect(profiles.mode(for: "com.adobe.Photoshop.2025") == .browse)
         #expect(PenApplicationPreferences(defaults: defaults).configuredApplications.isEmpty)
         profiles.set(.drawing, for: "com.adobe.Photoshop.2026", name: "Photoshop 2026")
         #expect(profiles.mode(for: "com.adobe.Photoshop.2026") == .drawing)
@@ -107,7 +108,7 @@ struct PenApplicationPreferencesTests {
         profiles.set(.browse, for: "com.example.b", name: "B")
         profiles.set(.pointer, for: "com.example.a", name: "A")
         profiles.set(.drawing, for: "com.example.z", name: "Z")
-        #expect(profiles.configuredApplications.map(\.bundleID) == ["com.example.z", "com.example.a", "com.example.b", "com.example.missing"])
+        #expect(profiles.configuredApplications.map(\.bundleID) == ["com.adobe.photoshop", "com.example.z", "com.example.a", "com.example.b", "com.example.missing"])
         #expect(profiles.applications["com.example.missing"] == "com.example.missing")
         #expect(profiles.mode(for: "com.example.missing") == .pointer)
     }
@@ -131,6 +132,56 @@ struct PenApplicationPreferencesTests {
         profiles.set(.drawing, for: "com.google.Chrome", name: "Chrome")
         #expect(!profiles.hasBrowseApplications)
         #expect(restored.mode(for: nil) == .pointer)
+    }
+    @Test func defaultPersistsWithoutRewritingExplicitOrLegacyChoices() throws {
+        let suite = "pen-default-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        profiles.set(.browse, for: "reader", name: "Reader")
+        PenNavigationPreferences(defaults: defaults).set(.pointer, for: "legacy", name: "Legacy")
+        for mode in PenApplicationMode.allCases {
+            profiles.defaultApplicationMode = mode
+            let restored = PenApplicationPreferences(defaults: defaults)
+            #expect(restored.defaultApplicationMode == mode)
+            #expect(restored.mode(for: "new") == mode)
+            #expect(restored.mode(for: "reader") == .browse)
+            #expect(restored.mode(for: "legacy") == .pointer)
+            #expect(restored.mode(for: nil) == .pointer)
+            #expect(restored.mode(for: "com.adobe.photoshop.2026") == .drawing)
+        }
+        defaults.set("invalid", forKey: "penDefaultApplicationMode")
+        #expect(profiles.defaultApplicationMode == .browse)
+    }
+    @Test func newAndDeletedExceptionsFollowCurrentDefault() throws {
+        let suite = "pen-default-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        profiles.defaultApplicationMode = .pointer
+        #expect(profiles.add(for: "reader", name: "Reader")?.mode == .pointer)
+        profiles.defaultApplicationMode = .drawing
+        #expect(profiles.add(for: "READER", name: "Reader")?.mode == .pointer)
+        profiles.remove(for: "reader")
+        #expect(profiles.mode(for: "reader") == .drawing)
+        profiles.defaultApplicationMode = .browse
+        #expect(PenApplicationPreferences(defaults: defaults).mode(for: "reader") == .browse)
+    }
+    @Test func visibleFamilyCanBeChangedAndRemovedWithoutDeletingExactVersions() throws {
+        let suite = "pen-family-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profiles = PenApplicationPreferences(defaults: defaults)
+        profiles.set(.drawing, for: "com.adobe.photoshop.2026", name: "PS2026")
+        PenNavigationPreferences(defaults: defaults).set(.pointer, for: "com.adobe.photoshop.2025", name: "PS2025")
+        profiles.set(.browse, for: "com.adobe.photoshop", name: "Photoshop（所有版本）")
+        #expect(profiles.mode(for: "com.adobe.photoshop.2026") == .drawing)
+        #expect(profiles.mode(for: "com.adobe.photoshop.2025") == .pointer)
+        #expect(profiles.mode(for: "com.adobe.photoshop.2027") == .browse)
+        profiles.defaultApplicationMode = .pointer
+        profiles.remove(for: "com.adobe.photoshop")
+        let restored = PenApplicationPreferences(defaults: defaults)
+        #expect(restored.mode(for: "com.adobe.photoshop.2027") == .pointer)
+        #expect(restored.mode(for: "com.adobe.photoshop.2026") == .drawing)
+        #expect(restored.configuredApplications.map(\.bundleID) == ["com.adobe.photoshop.2026", "com.adobe.photoshop.2025"])
+        #expect(restored.configuredApplications.allSatisfy { $0.scopeDescription == nil })
     }
     @Test func corruptOverridesFallBackToExistingProfiles() throws {
         let suite = "pen-profiles-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))

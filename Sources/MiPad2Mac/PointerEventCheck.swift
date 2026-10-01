@@ -69,7 +69,8 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         }
         // The native show animation briefly changes WindowServer bounds; start after it settles.
         append(after: 0.6) {
-            self.check(self.output.configuredProfiles.isEmpty, "零应用配置不自动登记当前窗口或内置绘画例外")
+            self.check(self.output.configuredProfiles.map(\.bundleID) == ["com.adobe.photoshop"], "初始列表只含可见Photoshop家族兼容例外")
+            self.output.removeApplicationProfile(bundleID: "com.adobe.photoshop")
             self.pen()
         }
         append(after: 0.04) { self.pen(0.5, 0.6) }
@@ -567,6 +568,39 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.check(self.output.scrollEventCount == self.profileScrollBefore && self.view.bridgeScrolls == self.fallbackScrollBefore,
                        "已识别内容的窗口移动后同样取消直接滚动，不向旧锚点投递")
             self.window.setFrame(self.fallbackFrame, display: true)
+        }
+        append(after: 0.08) {
+            self.output.setDefaultApplicationMode(.pointer)
+            self.profileDownBefore = self.output.downCount; self.profileUpBefore = self.output.upCount
+            self.pen()
+            self.check(self.output.downCount == self.profileDownBefore + 1, "未配置应用采用全局指针默认")
+            self.output.setDefaultApplicationMode(.drawing)
+            self.check(self.output.upCount == self.profileUpBefore + 1, "修改默认模式释放实际左键")
+            self.pen(0.55, 0.55); self.pen(down: false)
+            self.check(self.output.downCount == self.profileDownBefore + 1, "修改默认后的同次接触不补发新点击")
+            self.check(PenApplicationPreferences(defaults: self.defaults).defaultApplicationMode == .drawing,
+                       "默认模式通过隔离UserDefaults恢复")
+            self.pen()
+        }
+        append {
+            self.check(self.output.downCount == self.profileDownBefore + 2, "抬笔后的新接触采用绘画默认")
+            self.output.setDefaultApplicationMode(.browse)
+            self.pen(0.55, 0.55); self.pen(down: false)
+            self.output.momentumEnabled = true
+            self.pen()
+        }
+        append(after: 0.03) { self.pen(0.5, 0.55) }
+        append(after: 0.03) { self.pen(0.5, 0.68) }
+        append(after: 0.01) { self.pen(down: false) }
+        append(after: 0.08) {
+            self.check(self.output.momentumActive, "默认浏览应用抬笔后进入惯性")
+            self.output.setDefaultApplicationMode(.pointer)
+            self.check(!self.output.momentumActive, "修改默认模式立即停止惯性")
+            self.momentumBefore = self.view.receivedMomentumPhases.filter { $0 != 3 }.count
+        }
+        append(after: 0.08) {
+            self.check(self.view.receivedMomentumPhases.filter { $0 != 3 }.count == self.momentumBefore,
+                       "默认修改后不继续投递惯性帧")
             self.finish()
         }
         runNext()

@@ -33,15 +33,22 @@ enum PenApplicationID {
     }
 }
 
+public enum PenApplicationProfileScope: Equatable { case application, photoshopVersions }
+
 public struct PenApplicationProfile: Equatable {
     public let bundleID: String
     public let name: String
     public let mode: PenApplicationMode
+    public var scope: PenApplicationProfileScope { bundleID == "com.adobe.photoshop" ? .photoshopVersions : .application }
+    public var scopeDescription: String? {
+        scope == .photoshopVersions ? "适用于所有Photoshop版本；具体版本的例外优先。" : nil
+    }
 }
 
 /// Explicit profiles override legacy choices. Removing a profile also removes its legacy records.
 public final class PenApplicationPreferences {
-    public static let defaultMode = PenApplicationMode.browse
+    public static let initialDefaultMode = PenApplicationMode.browse
+    private static let photoshopFamily = "com.adobe.photoshop"
     private let defaults: UserDefaults
     private let navigation: PenNavigationPreferences
     private let longPress: LongPressPreferences
@@ -49,16 +56,25 @@ public final class PenApplicationPreferences {
         self.defaults = defaults; navigation = PenNavigationPreferences(defaults: defaults)
         longPress = LongPressPreferences(defaults: defaults)
     }
+    public var defaultApplicationMode: PenApplicationMode {
+        get { defaults.string(forKey: "penDefaultApplicationMode").flatMap(PenApplicationMode.init(rawValue:)) ?? Self.initialDefaultMode }
+        set { defaults.set(newValue.rawValue, forKey: "penDefaultApplicationMode") }
+    }
     private func dictionary(_ key: String) -> [String: String] {
         PenApplicationID.dictionary(defaults.dictionary(forKey: key) as? [String: String] ?? [:])
     }
     private var removedLegacyIDs: Set<String> {
         Set((defaults.stringArray(forKey: "penApplicationRemovedLegacyIDs") ?? []).compactMap(PenApplicationID.normalize))
     }
-    /// Only stored choices/additions belong in the list; implicit defaults and foreground apps do not.
+    /// Stored choices and the removable Photoshop compatibility family belong in the list.
+    /// The foreground app and applications following the global default do not.
     /// Drawing rows come first, then names, with Bundle ID breaking name ties.
     public var configuredApplications: [PenApplicationProfile] {
         var names: [String: String] = [:]
+        if defaults.object(forKey: "penLongPressExcludedApps") == nil,
+           !removedLegacyIDs.contains(Self.photoshopFamily) {
+            names[Self.photoshopFamily] = "Adobe Photoshop（所有版本）"
+        }
         let exclusions = PenApplicationID.dictionary(longPress.configuredExclusions)
         for layer in [exclusions, PenApplicationID.dictionary(navigation.applications),
                       dictionary("penApplicationInteractionNames")] {
@@ -82,17 +98,28 @@ public final class PenApplicationPreferences {
         guard let id = PenApplicationID.normalize(id) else { return .pointer }
         if let raw = dictionary("penApplicationInteractionModes")[id],
            let explicit = PenApplicationMode(rawValue: raw) { return explicit }
-        if removedLegacyIDs.contains(id) { return Self.defaultMode }
-        if longPress.excludes(id) { return .drawing }
-        return navigation.configuredMode(for: id).map { $0 == .browse ? .browse : .pointer } ?? Self.defaultMode
+        if removedLegacyIDs.contains(id) { return defaultApplicationMode }
+        // Exact user records take priority over the version-family compatibility choice.
+        let exclusions = PenApplicationID.dictionary(longPress.configuredExclusions)
+        if exclusions[id] != nil { return .drawing }
+        if let legacy = navigation.configuredMode(for: id) { return legacy == .browse ? .browse : .pointer }
+        let family = Self.photoshopFamily
+        if id == family || id.hasPrefix(family + ".") {
+            guard !removedLegacyIDs.contains(family) else { return defaultApplicationMode }
+            if let raw = dictionary("penApplicationInteractionModes")[family], let mode = PenApplicationMode(rawValue: raw) { return mode }
+            if exclusions[family] != nil { return .drawing }
+            if let legacy = navigation.configuredMode(for: family) { return legacy == .browse ? .browse : .pointer }
+            if defaults.object(forKey: "penLongPressExcludedApps") == nil { return .drawing }
+        }
+        return defaultApplicationMode
     }
     /// Reports explicit browse records, not whether an unconfigured application can browse.
     public var hasBrowseApplications: Bool { applications.keys.contains { mode(for: $0) == .browse } }
-    /// Adding an existing choice preserves its mode; a new user record starts in browse.
+    /// Adding an existing choice preserves its mode; a new record captures the current default.
     @discardableResult public func add(for id: String, name: String) -> PenApplicationProfile? {
         guard let id = PenApplicationID.normalize(id) else { return nil }
         let existing = configuredApplications.first { $0.bundleID == id }
-        set(existing?.mode ?? Self.defaultMode, for: id, name: name)
+        set(existing?.mode ?? defaultApplicationMode, for: id, name: name)
         return configuredApplications.first { $0.bundleID == id }
     }
     public func set(_ mode: PenApplicationMode, for id: String, name: String) {
@@ -108,11 +135,10 @@ public final class PenApplicationPreferences {
                     "penNavigationApplicationModes", "penNavigationApplicationNames"] {
             replaceRecord(key, id: id, value: nil)
         }
-        // Do not materialize/remove the built-in Photoshop family rule or unrelated versions.
-        if id != "com.adobe.photoshop", defaults.object(forKey: "penLongPressExcludedApps") != nil {
+        if defaults.object(forKey: "penLongPressExcludedApps") != nil {
             replaceRecord("penLongPressExcludedApps", id: id, value: nil)
         }
-        // An exact tombstone suppresses inherited drawing rules for this deleted application only.
+        // A family tombstone removes inherited compatibility; exact version choices remain.
         defaults.set(removedLegacyIDs.union([id]).sorted(), forKey: "penApplicationRemovedLegacyIDs")
     }
     private func replaceRecord(_ key: String, id: String, value: String?) {

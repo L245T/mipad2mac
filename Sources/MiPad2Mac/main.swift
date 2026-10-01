@@ -204,6 +204,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func refreshNavigationMenu() {
         let menu = NSMenu(); menu.autoenablesItems = false
+        let defaultItem = NSMenuItem(title: "默认模式：" + output.defaultApplicationMode.title, action: nil, keyEquivalent: "")
+        let defaultMenu = NSMenu(); defaultMenu.autoenablesItems = false
+        for (index, mode) in PenApplicationMode.allCases.enumerated() {
+            let item = NSMenuItem(title: mode == .browse ? "浏览（推荐）" : mode.title,
+                                  action: #selector(menuSelectDefaultNavigation(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index
+            item.state = output.defaultApplicationMode == mode ? .on : .off
+            defaultMenu.addItem(item)
+        }
+        defaultItem.submenu = defaultMenu; menu.addItem(defaultItem); menu.addItem(.separator())
         let title = NSMenuItem(title: output.profileName, action: nil, keyEquivalent: "")
         title.isEnabled = false; menu.addItem(title)
         for (index, mode) in PenApplicationMode.allCases.enumerated() {
@@ -219,6 +229,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func menuSelectNavigation(_ sender: NSMenuItem) {
         guard PenApplicationMode.allCases.indices.contains(sender.tag) else { return }
         output.changeNavigation(PenApplicationMode.allCases[sender.tag]); refreshNavigationMenu(); refreshStats()
+    }
+    @objc func menuSelectDefaultNavigation(_ sender: NSMenuItem) {
+        guard PenApplicationMode.allCases.indices.contains(sender.tag) else { return }
+        output.setDefaultApplicationMode(PenApplicationMode.allCases[sender.tag])
+        refreshNavigationMenu(); refreshStats()
     }
     @objc func menuSelectScreen(_ sender: NSMenuItem) {
         guard sender.tag > 0, sender.tag < screenPicker.numberOfItems else { return }
