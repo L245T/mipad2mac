@@ -9,6 +9,7 @@ final class PointerTestView: NSView {
     var bridgeUp = 0
     var bridgeClicks = 0
     var bridgeScrolls = 0
+    var receivedScrollFlags: [UInt64] = []
     var receivedClickCounts: [Int] = []
     var receivedScrollPhases: [Int64] = []
     var receivedRightClicks = 0
@@ -89,6 +90,7 @@ final class PointerTestView: NSView {
     override func scrollWheel(with event: NSEvent) {
         guard let cg = event.cgEvent, cg.getIntegerValueField(.eventSourceUserData) == bridgeEventTag else { return }
         bridgeScrolls += 1
+        if receivedScrollFlags.count < 200 { receivedScrollFlags.append(cg.flags.rawValue) }
         let phase = cg.getIntegerValueField(.scrollWheelEventScrollPhase)
         if receivedScrollPhases.count < 200 { receivedScrollPhases.append(phase) }
         if phase != 2 || event.timestamp - lastScrollLog >= 0.5 {

@@ -23,11 +23,19 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private var failures: [String] = []
     private var steps: [(Double, () -> Void)] = []
     private var checks: [String] = []
+    private var testModifiers: CGEventFlags = []
+    private var temporaryDownBefore = 0
+    private var temporaryScrollBefore = 0
+    private var temporaryRightBefore = 0
+    private var temporaryFlagsBefore = 0
+    private var diagnosticMessages: [String] = []
+    private var temporaryFrame = NSRect.zero
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         originalCursor = CGEvent(source: nil)?.location ?? .zero
         defaults = UserDefaults(suiteName: suite)!
-        output = PointerOutput(defaults: defaults, observeApplications: false)
+        output = PointerOutput(defaults: defaults, observeApplications: false, diagnosticOwnWindow: true,
+                               modifierState: { [weak self] in self?.testModifiers ?? [] })
         output.longPress.enabled = false
         output.tabletEnabled = true
         let id = Bundle.main.bundleIdentifier ?? "org.mipad2mac.app"
@@ -45,7 +53,10 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         let top = NSScreen.screens.first!.frame.maxY
         output.mapping = Mapping(bounds: CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height))
         view.record = { print($0) }
-        output.longPressDiagnostic = { print($0) }
+        output.longPressDiagnostic = { [weak self] message in
+            print(message)
+            if self?.diagnosticMessages.count ?? 200 < 200 { self?.diagnosticMessages.append(message) }
+        }
         append { self.pen() }
         append(after: 0.04) { self.pen(0.5, 0.6) }
         append(after: 0.04) { self.pen(0.5, 0.7) }
@@ -246,6 +257,80 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         append(after: cadence) { self.pen(0.5 + 6 / 719.0); self.pen(0.5 + 6 / 719.0, down: false) }
         append(after: cadence) {
             self.check(Array(self.window.receivedDownClickCounts.suffix(2)) == [1, 1], "绘画保留原位移判定，不使用连续点按额外容差")
+            self.output.release(); self.output.tabletEnabled = false
+            self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
+            self.output.longPress.enabled = true
+            self.view.setAccessibilityRole(.unknown)
+            self.temporaryDownBefore = self.output.downCount
+            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.temporaryRightBefore = self.view.receivedRightClicks
+            self.temporaryFlagsBefore = self.view.receivedScrollFlags.count
+            self.testModifiers = .maskAlternate
+            self.pen()
+        }
+        append(after: 0.04) {
+            self.testModifiers = [] // Releasing Option during contact must not turn scrolling into selection.
+            self.pen(0.5, 0.6)
+        }
+        append(after: 0.08) { self.pen(0.5, 0.7); self.pen(down: false) }
+        append {
+            self.check(self.view.bridgeScrolls > self.temporaryScrollBefore, "Option临时滚动实际到达未知语义的窗口区域")
+            self.check(self.output.downCount == self.temporaryDownBefore, "临时滚动没有左键提交")
+            self.check(self.view.receivedRightClicks == self.temporaryRightBefore, "临时滚动没有长按右键")
+            self.check(self.view.receivedScrollFlags.dropFirst(self.temporaryFlagsBefore).allSatisfy { $0 & CGEventFlags.maskAlternate.rawValue == 0 }, "Option请求标记不传入目标滚动事件")
+            self.output.release(); self.pen(); self.pen(down: false)
+        }
+        append {
+            self.check(self.output.downCount == self.temporaryDownBefore + 1, "抬笔后普通接触恢复单击")
+            self.output.applicationProfiles.set(.pointer, for: id, name: "本地事件验收")
+            self.temporaryDownBefore = self.output.downCount
+            self.output.toggleTemporaryScroll(); self.pen()
+        }
+        append(after: 0.8) { self.pen(down: false) }
+        append {
+            self.check(self.output.downCount == self.temporaryDownBefore && self.view.receivedRightClicks == self.temporaryRightBefore, "一次性入口静止或轻点不补发点击和右键")
+            self.check(!self.output.temporaryScrollArmed, "一次性入口在接触开始时消耗")
+            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.output.toggleTemporaryScroll(); self.pen()
+        }
+        append(after: 0.04) { self.pen(0.5, 0.6); self.pen(down: false) }
+        append {
+            self.check(self.view.bridgeScrolls > self.temporaryScrollBefore, "屏幕入口一次性滚动实际到达")
+            self.output.release(); self.temporaryFrame = self.window.frame
+            self.output.toggleTemporaryScroll(); self.pen()
+        }
+        append(after: 0.04) { self.pen(0.5, 0.6) }
+        append(after: 0.08) {
+            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.window.setFrameOrigin(NSPoint(x: self.temporaryFrame.minX + 30, y: self.temporaryFrame.minY))
+        }
+        // Let WindowServer publish the moved geometry before the next synthetic pen report.
+        append(after: 0.08) {
+            self.pen(0.5, 0.7); self.pen(down: false)
+        }
+        append {
+            self.check(self.view.bridgeScrolls == self.temporaryScrollBefore && self.diagnosticMessages.contains { $0.contains("目标窗口改变或被遮挡") }, "窗口移动后取消临时滚动，不继续投递旧锚点")
+            self.window.setFrame(self.temporaryFrame, display: true)
+            self.output.release(); self.output.longPress.enabled = false
+            self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
+            self.temporaryDownBefore = self.output.downCount
+            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.testModifiers = [.maskAlternate, .maskCommand]
+            self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
+        }
+        append {
+            self.check(self.output.downCount == self.temporaryDownBefore + 1 && self.view.bridgeScrolls == self.temporaryScrollBefore, "Option加其他修饰键保留原普通拖动")
+            self.output.release(); self.output.applicationProfiles.set(.drawing, for: id, name: "本地事件验收")
+            self.testModifiers = .maskAlternate
+            self.temporaryDownBefore = self.output.downCount
+            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
+        }
+        append {
+            self.check(self.output.downCount == self.temporaryDownBefore + 1 && self.view.bridgeScrolls == self.temporaryScrollBefore, "绘画模式优先于Option临时滚动")
+            self.testModifiers = []; self.output.release(); self.output.applicationProfiles.set(.pointer, for: id, name: "本地事件验收")
+            self.output.toggleTemporaryScroll(); self.output.release()
+            self.check(!self.output.temporaryScrollArmed, "暂停或释放清除未使用的临时滚动")
             self.finish()
         }
         runNext()
@@ -304,7 +389,7 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             "postedDown": output.downCount, "postedUp": output.upCount, "postedScroll": output.scrollEventCount,
             "warpError": output.lastWarpError.rawValue, "windowTrace": window.trace, "receivedDownClickCounts": window.receivedDownClickCounts,
             "originalWindowFrame": NSStringFromRect(originalFrame), "windowMovable": window.isMovable,
-            "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
+            "frontmost": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown", "diagnostics": diagnosticMessages]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             print(String(decoding: data, as: UTF8.self))
             if let index = CommandLine.arguments.firstIndex(of: "--event-check-output"), index + 1 < CommandLine.arguments.count {

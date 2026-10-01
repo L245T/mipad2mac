@@ -61,6 +61,7 @@ public struct LongPressGesture {
     private var navigationMode = PenNavigationMode.pointer
     private var scrollAxis = PenScrollAxis.vertical
     private var scrollRemainder = 0.0
+    private var clickOnLift = true
     public private(set) var deadline: TimeInterval?
     public var hasScheduledClick: Bool { deadline != nil }
     public var isIdle: Bool { phase == .idle }
@@ -77,7 +78,7 @@ public struct LongPressGesture {
     public mutating func consumeNavigation(_ sample: Sample, mapping: Mapping, now: TimeInterval,
                                  enabled: Bool, delay: TimeInterval, drawing: Bool,
                                  jitterFilter: LongPressJitterFilter = .medium,
-                                 navigation: PenNavigationMode = .pointer) -> PenGestureEvents {
+                                 navigation: PenNavigationMode = .pointer, scrollOnly: Bool = false) -> PenGestureEvents {
         let contact = sample.touching && sample.inRange && !sample.eraser
         if phase == .completed {
             // The context menu owns subsequent motion. Never click or drag again until a new contact.
@@ -105,6 +106,7 @@ public struct LongPressGesture {
                 return PenGestureEvents(pointer: sample.positionValid ? [PointerEvent(action: .move, point: mapping.point(x: sample.x, y: sample.y))] : [])
             }
             navigationMode = navigation
+            clickOnLift = !scrollOnly
             if !enabled && navigation == .pointer {
                 phase = .direct
                 return PenGestureEvents(pointer: direct.consume(sample, mapping: mapping, drawing: drawing).map { [$0] } ?? [])
@@ -112,7 +114,7 @@ public struct LongPressGesture {
             self.jitterFilter = jitterFilter
             origin = mapping.point(x: sample.x, y: sample.y); last = origin
             phase = .pending
-            deadline = enabled ? now + LongPressPreferences.validDelay(delay) : nil
+            deadline = enabled && !scrollOnly ? now + LongPressPreferences.validDelay(delay) : nil
             return PenGestureEvents(pointer: navigation == .browse ? [PointerEvent(action: .move, point: origin)] : [])
         }
         if !contact {
@@ -122,7 +124,7 @@ public struct LongPressGesture {
             }
             let wasPending = phase == .pending
             phase = .idle; deadline = nil
-            return PenGestureEvents(pointer: wasPending ? [PointerEvent(action: .down, point: origin), PointerEvent(action: .up, point: origin)]
+            return PenGestureEvents(pointer: wasPending ? (clickOnLift ? [PointerEvent(action: .down, point: origin), PointerEvent(action: .up, point: origin)] : [])
                 : [PointerEvent(action: .up, point: last)])
         }
         let point = mapping.point(x: sample.x, y: sample.y)

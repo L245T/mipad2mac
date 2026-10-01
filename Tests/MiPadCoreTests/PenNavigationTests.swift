@@ -146,3 +146,67 @@ private func browse(_ gesture: inout LongPressGesture, _ sample: Sample,
     #expect(lift.pointer == lateral.pointer)
     #expect(lift.scroll.first?.anchor == CGPoint(x: -500, y: 0))
 }
+
+@Test func temporaryScrollNeverClicksEvenWhenHeldOrMovedTooLittle() {
+    var gesture = LongPressGesture()
+    let start = gesture.consumeNavigation(penAt(), mapping: browseScreen, now: 0, enabled: true,
+        delay: 0.3, drawing: true, navigation: .browse, scrollOnly: true)
+    #expect(start.pointer.map(\.action) == [.move])
+    #expect(!gesture.hasScheduledClick)
+    #expect(gesture.fire(now: 10).isEmpty)
+    _ = gesture.consumeNavigation(penAt(0.502, 0.502), mapping: browseScreen, now: 11, enabled: true,
+        delay: 0.3, drawing: true, navigation: .pointer) // interpretation is latched at contact start
+    let lift = gesture.consumeNavigation(penAt(down: false), mapping: browseScreen, now: 12, enabled: true,
+        delay: 0.3, drawing: true)
+    #expect(lift.pointer.isEmpty && lift.scroll.isEmpty)
+    #expect(gesture.isIdle)
+    // Next ordinary contact still taps normally.
+    _ = browse(&gesture, penAt())
+    #expect(browse(&gesture, penAt(down: false)).pointer.map(\.action) == [.down, .up])
+}
+
+@Test func temporaryScrollLocksUntilLiftAndCancelsWithoutLeftButtons() {
+    var gesture = LongPressGesture()
+    _ = gesture.consumeNavigation(penAt(), mapping: browseScreen, now: 0, enabled: false,
+        delay: 0.3, drawing: true, navigation: .browse, scrollOnly: true)
+    let moved = gesture.consumeNavigation(penAt(0.5, 0.52), mapping: browseScreen, now: 1, enabled: true,
+        delay: 0.3, drawing: true, navigation: .pointer)
+    #expect(moved.scroll.first?.phase == .began)
+    #expect(moved.pointer.map(\.action) == [.move])
+    #expect(!gesture.hasScheduledClick)
+    let cancelled = gesture.cancelNavigation()
+    #expect(cancelled.scroll.first?.phase == .cancelled)
+    #expect(cancelled.pointer.isEmpty)
+    #expect(browse(&gesture, penAt(0.5, 0.8)).scroll.isEmpty)
+    _ = browse(&gesture, penAt(down: false))
+    #expect(gesture.isIdle)
+}
+
+@Test func temporaryRequestIsOneShotExpiresAndDoesNotOverrideDrawing() {
+    var request = TemporaryScrollRequest()
+    request.arm(now: 0)
+    #expect(request.isArmed(now: 29))
+    let result1 = request.consume(now: 1, optionHeld: false, mode: .pointer, externalWindow: false)
+    #expect(!result1)
+    #expect(request.isArmed(now: 1))
+    let result2 = request.consume(now: 2, optionHeld: false, mode: .pointer, externalWindow: true)
+    #expect(result2)
+    let result3 = request.consume(now: 3, optionHeld: false, mode: .pointer, externalWindow: true)
+    #expect(!result3)
+    request.arm(now: 10)
+    #expect(!request.isArmed(now: 40))
+    let result4 = request.consume(now: 40, optionHeld: false, mode: .browse, externalWindow: true)
+    #expect(!result4)
+    request.arm(now: 50)
+    let result5 = request.consume(now: 51, optionHeld: true, mode: .drawing, externalWindow: true)
+    #expect(!result5)
+    #expect(!request.isArmed(now: 51))
+    let result6 = request.consume(now: 52, optionHeld: true, mode: .pointer, externalWindow: true, blockedWindow: true)
+    #expect(!result6)
+    let result7 = request.consume(now: 53, optionHeld: true, mode: .browse, externalWindow: true)
+    #expect(result7)
+    let pointerOption = request.consume(now: 54, optionHeld: true, mode: .pointer, externalWindow: true)
+    #expect(!pointerOption)
+    request.arm(now: 60); request.cancel()
+    #expect(!request.isArmed(now: 61))
+}
