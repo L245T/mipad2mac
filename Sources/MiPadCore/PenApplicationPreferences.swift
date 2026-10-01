@@ -8,7 +8,7 @@ public enum PenApplicationMode: String, CaseIterable {
     public var explanation: String {
         switch self {
         case .pointer: return "拖动、选字和点击；长按右键按下方全局设置执行。"
-        case .browse: return "滑动内容滚动，光标跟随笔尖；双击或三击时按住最后一下再拖动可选字。顶栏、工具栏和输入控件保留普通拖动，静止长按按下方全局设置执行。绘画时切换为绘画模式。"
+        case .browse: return "滑动内容或未知区域滚动，光标跟随笔尖；双击或三击时按住最后一下再拖动可选字。已识别的顶栏、工具栏和输入控件保留普通拖动；未知窗口顶部保留拖动，按住Option落笔也可普通拖动。静止长按按下方全局设置执行。绘画时切换为绘画模式。"
         case .drawing: return "即时落笔，保留拖动及压力与倾斜输出；此应用不滚动、不触发长按右键。压力与倾斜仍遵循全局开关。"
         }
     }
@@ -85,6 +85,14 @@ public enum PenHitRegion: Equatable {
             if node.role == "AXButton" && !inWeb { return .chrome }
         }
         if boundary != nil || readOnlyText { return .content }
-        return nodes.contains { $0.role == "AXWindow" } ? .chrome : .unknown
+        return .unknown
+    }
+}
+
+/// Geometric fallback only when the application supplies no usable region metadata.
+/// The top band protects ordinary window dragging; it does not identify custom toolbars/editors.
+public enum UnknownBrowseArea {
+    public static func contains(_ point: CGPoint, in bounds: CGRect) -> Bool {
+        bounds.contains(point) && point.y >= bounds.minY + 32
     }
 }

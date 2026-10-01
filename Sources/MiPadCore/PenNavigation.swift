@@ -51,21 +51,3 @@ public struct PenGestureEvents {
         self.pointer = pointer; self.scroll = scroll
     }
 }
-
-/// A deliberately temporary action, never a saved application mode.
-public struct TemporaryScrollRequest {
-    private var deadline: TimeInterval?
-    public init() {}
-    public func isArmed(now: TimeInterval) -> Bool { deadline.map { now < $0 } ?? false }
-    public mutating func arm(now: TimeInterval) { deadline = now + 30 }
-    public mutating func cancel() { deadline = nil }
-    /// Own UI contacts do not consume the screen button's request. The first external contact does.
-    public mutating func consume(now: TimeInterval, optionHeld: Bool, mode: PenApplicationMode,
-                                 externalWindow: Bool, blockedWindow: Bool = false) -> Bool {
-        guard externalWindow else { return false }
-        // Preserve native Option-drag actions in ordinary pointer profiles (e.g. file duplication).
-        let requested = (optionHeld && mode == .browse) || isArmed(now: now)
-        deadline = nil
-        return requested && mode != .drawing && !blockedWindow
-    }
-}

@@ -20,7 +20,7 @@ final class SettingsPresentation: ObservableObject {
             app.captureLabel.stringValue, app.rateTestLabel.stringValue,
             app.screenPicker.itemTitles.joined(), String(app.screenPicker.indexOfSelectedItem),
             String(app.enabled), String(app.output.tabletEnabled), String(app.monitoring),
-            app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded), String(app.output.temporaryScrollArmed),
+            app.output.profileID ?? "", app.output.profileName, app.output.profileMode.rawValue, String(app.output.profileExcluded),
             String(app.rotationPicker.indexOfSelectedItem), String(app.flipX.state.rawValue), String(app.flipY.state.rawValue),
             String(app.automaticControl.requested), String(app.captureActive), String(app.rateTestActive), String(app.automaticControl.pending),
             String(app.settingsPage.materialToggle.state.rawValue), String(app.settingsPage.loginToggle.state.rawValue), String(app.settingsPage.silentLoginToggle.state.rawValue), String(app.autoUpdate.state.rawValue), String(app.updateChecker.interval.rawValue), app.updateChecker.channel.rawValue, app.startupCoordinator.notices.map { $0.rule.key }.joined(), app.nativeUpdater.message, String(app.nativeUpdater.busy), String(app.updateChecker.scheduler.state.active != nil)]
@@ -169,16 +169,7 @@ struct SettingsDetail: View {
                 }.disabled(app.output.profileID == nil)
                 settingDescription(app.output.profileMode.explanation)
                 HStack { Spacer(); Button("添加或选择应用…") { model.act { app.output.chooseNavigationApplication() } } }
-                HStack {
-                    Text("临时滚动")
-                    Spacer()
-                    Button(app.output.temporaryScrollArmed ? "取消临时滚动" : "下一次拖动滚动") {
-                        model.act { app.output.toggleTemporaryScroll() }
-                    }.disabled(!app.enabled)
-                }
-                settingDescription(app.output.temporaryScrollArmed
-                    ? "请在30秒内到目标窗口落笔。仅本次拖动用于滚动，抬笔恢复；绘画应用不受影响。"
-                    : "浏览模式下，按住Option落笔拖动可临时滚动；其他指针应用可点击上方按钮，用笔完成下一次滚动。用于微信等无法识别内容区域的窗口。")
+                settingDescription("浏览模式持续生效，无需逐次开启。无法识别的内容默认滚动；需要普通拖动时，按住Option落笔。未知区域中的输入框也可能滚动，可用Option拖动或双击／三击拖选。")
             } header: { Text("应用笔设置") } footer: {
                 footerNote("设置按应用自动保存，也可从HID菜单切换。原“不使用长按右键”的应用已按绘画模式保留，在此统一调整。")
             }

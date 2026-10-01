@@ -25,19 +25,12 @@ final class PointerOutput {
     var scrollEventCount = 0
     var scrollGestureCount = 0
     private var postedScrollAnchor: CGPoint?
-    private var temporaryScroll = TemporaryScrollRequest()
-    private var temporaryContact = false
-    private var temporaryWindow: ScrollWindow?
+    private var fallbackContact = false
+    private var fallbackWindow: ScrollWindow?
     private var nextWindowValidation: TimeInterval = 0
     private let diagnosticOwnWindow: Bool
+    private let diagnosticHitUnavailable: () -> Bool
     private let modifierState: () -> CGEventFlags
-    var temporaryScrollArmed: Bool { temporaryScroll.isArmed(now: ProcessInfo.processInfo.systemUptime) }
-    func toggleTemporaryScroll() {
-        let armed = temporaryScrollArmed
-        release()
-        if !armed { temporaryScroll.arm(now: ProcessInfo.processInfo.systemUptime) }
-        longPressDiagnostic(armed ? "临时滚动已取消" : "临时滚动：等待下一次外部窗口落笔，30秒后失效")
-    }
 
     var profileID: String? { (selectedProfileID ?? lastExternalApplication?.bundleIdentifier)?.lowercased() }
     var profileName: String { selectedProfileName ?? lastExternalApplication?.localizedName ?? "请先选择应用" }
@@ -92,9 +85,11 @@ final class PointerOutput {
 
     init(defaults: UserDefaults = .standard, observeApplications: Bool = true,
          diagnosticOwnWindow: Bool = false,
+         diagnosticHitUnavailable: @escaping () -> Bool = { false },
          modifierState: @escaping () -> CGEventFlags = { CGEventSource.flagsState(.combinedSessionState) }) {
         // Only the explicit, isolated local-event diagnostic can scroll its own receiver window.
         self.diagnosticOwnWindow = diagnosticOwnWindow && !observeApplications
+        self.diagnosticHitUnavailable = diagnosticOwnWindow && !observeApplications ? diagnosticHitUnavailable : { false }
         self.modifierState = modifierState
         longPress = LongPressPreferences(defaults: defaults)
         navigation = PenNavigationPreferences(defaults: defaults)
@@ -118,7 +113,7 @@ final class PointerOutput {
                 if self.gesture.isIdle { self.clicks.reset() }
             } else {
                 self.longPressDiagnostic("输入结束：前台应用切换")
-                self.release(cancelTemporaryRequest: !self.gesture.isIdle)
+                self.release()
             }
         }
     }
@@ -127,7 +122,7 @@ final class PointerOutput {
         if let applicationObserver { NSWorkspace.shared.notificationCenter.removeObserver(applicationObserver) }
     }
     // AX hit testing identifies the application under the pen, including inactive windows.
-    // Unknown targets take the immediate path; never guess that they are safe to defer.
+    // Browse profiles use a guarded window fallback when region metadata is unavailable.
     private struct PenTarget {
         let app: NSRunningApplication?
         let region: PenHitRegion
@@ -155,6 +150,7 @@ final class PointerOutput {
                             layer: (item[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1)
     }
     private func target(at point: CGPoint) -> PenTarget? {
+        if diagnosticHitUnavailable() { return nil }
         let deadline = ProcessInfo.processInfo.systemUptime + 0.1
         var element: AXUIElement?
         let system = AXUIElementCreateSystemWide()
@@ -240,7 +236,9 @@ final class PointerOutput {
             self.longPressTimer = nil
             guard self.gesture.hasScheduledClick else { return }
             guard let candidateTarget = self.candidateTarget,
-                  self.target(at: self.pressLocation)?.app?.processIdentifier == candidateTarget,
+                  (self.fallbackContact
+                    ? self.validFallbackWindow(at: self.pressLocation)
+                    : self.target(at: self.pressLocation)?.app?.processIdentifier == candidateTarget),
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == self.candidateFrontmost else {
                 self.longPressDiagnostic("长按取消：到时目标应用或前台应用已变化/无法识别")
                 self.release(); return
@@ -288,30 +286,28 @@ final class PointerOutput {
             pressLocation = mapping.point(x: sample.x, y: sample.y)
             let frontmost = NSWorkspace.shared.frontmostApplication
             let modifiers = modifierState()
-            let optionHeld = modifiers.contains(.maskAlternate)
-                && modifiers.intersection([.maskCommand, .maskControl, .maskShift]).isEmpty
+            let directDrag = !modifiers.intersection([.maskAlternate, .maskCommand, .maskControl, .maskShift]).isEmpty
             let hit = (longPress.enabled || applicationProfiles.hasBrowseApplications) ? target(at: pressLocation) : nil
-            let targetApp = hit?.app
-            let topWindow = (hit == nil || optionHeld || temporaryScrollArmed) ? window(at: pressLocation) : nil
-            let resolvedApp = topWindow?.app ?? targetApp
+            let topWindow = (hit == nil || applicationProfiles.hasBrowseApplications) ? window(at: pressLocation) : nil
+            let matchingHit = topWindow == nil || hit?.app?.processIdentifier == topWindow?.app.processIdentifier ? hit : nil
+            let resolvedApp = topWindow?.app ?? matchingHit?.app
+            let targetApp = matchingHit?.app
             let appMode = applicationProfiles.mode(for: resolvedApp?.bundleIdentifier ?? frontmost?.bundleIdentifier)
-            if optionHeld || temporaryScrollArmed {
-                longPressDiagnostic("临时滚动判定：Option=\(optionHeld)，窗口=\(topWindow?.app.bundleIdentifier ?? "未知")，层=\(topWindow?.layer ?? -1)，模式=\(appMode.title)")
-            }
-            temporaryContact = temporaryScroll.consume(now: contactStarted, optionHeld: optionHeld, mode: appMode,
-                externalWindow: topWindow.map { diagnosticOwnWindow || $0.app.processIdentifier != ProcessInfo.processInfo.processIdentifier } ?? false,
-                blockedWindow: topWindow?.layer != 0)
-            temporaryWindow = temporaryContact ? topWindow : nil
+            let unknown = matchingHit?.region == nil || matchingHit?.region == .unknown
+            let fallbackEligible = topWindow.map {
+                $0.layer == 0 && (diagnosticOwnWindow || $0.app.processIdentifier != ProcessInfo.processInfo.processIdentifier)
+                    && UnknownBrowseArea.contains(pressLocation, in: $0.bounds)
+            } ?? false
+            fallbackContact = appMode == .browse && !directDrag && unknown && fallbackEligible
+            fallbackWindow = fallbackContact ? topWindow : nil
             nextWindowValidation = 0
-            if temporaryContact { clicks.reset(); longPressDiagnostic("临时滚动：\(resolvedApp?.bundleIdentifier ?? "未知")；仅本次接触，不单击、不触发长按") }
+            if fallbackContact { longPressDiagnostic("未知区域持续浏览：\(resolvedApp?.bundleIdentifier ?? "未知")；窗口顶部保留拖动，Option可普通拖动") }
             contactClickTolerance = appMode == .drawing ? 0 : clickPreferences.jitterTolerance
-            candidateTarget = temporaryContact ? topWindow?.app.processIdentifier : targetApp?.processIdentifier
+            candidateTarget = fallbackContact ? topWindow?.app.processIdentifier : targetApp?.processIdentifier
             candidateFrontmost = frontmost?.processIdentifier
-            // Only recognized content scrolls. Window chrome and unidentified areas retain the pointer.
-            contactMode = temporaryContact || (appMode == .browse && hit?.region == .content) ? .browse : .pointer
-            // A held second/third tap explicitly selects text instead of starting a new scroll.
-            // Preview only: emit(.down) consumes the count once, with the physical press time.
-            let multiTapSelection = !temporaryContact && contactMode == .browse
+            contactMode = appMode == .browse && !directDrag && (matchingHit?.region == .content || fallbackContact) ? .browse : .pointer
+            // Second/third held taps retain selection, including unknown custom content.
+            let multiTapSelection = contactMode == .browse
                 && clicks.nextCount(at: pressLocation, now: contactStarted, interval: NSEvent.doubleClickInterval,
                                    extraTolerance: contactClickTolerance) > 1
             if multiTapSelection { contactMode = .pointer }
@@ -321,7 +317,7 @@ final class PointerOutput {
                 }.joined(separator: " → ") ?? "无区域信息"
                 longPressDiagnostic("浏览区域判定：\(targetApp?.bundleIdentifier ?? "未知")；\(path)；\(hit?.endReason ?? "目标查询失败")；区域\(String(describing: hit?.region)) → \(contactMode.title)")
             }
-            deferredContact = !temporaryContact && longPress.enabled && appMode != .drawing && hit?.region != .chrome && targetApp != nil && !multiTapSelection
+            deferredContact = !directDrag && longPress.enabled && appMode != .drawing && matchingHit?.region != .chrome && (!unknown || fallbackContact) && (targetApp != nil || fallbackContact) && !multiTapSelection
             if multiTapSelection { longPressDiagnostic("连续点按：本次接触保持文字选择，不滚动、不触发长按右键") }
             compatibilityContact = deferredContact && longPress.compatibilityEnabled
                 && (targetApp?.bundleIdentifier.map { id in
@@ -345,7 +341,7 @@ final class PointerOutput {
         let wasPending = gesture.isPending
         let result = gesture.consumeNavigation(sample, mapping: mapping, now: ProcessInfo.processInfo.systemUptime,
                                      enabled: deferredContact, delay: longPress.delay, drawing: tabletEnabled,
-                                     jitterFilter: longPress.jitterFilter, navigation: contactMode, scrollOnly: temporaryContact)
+                                     jitterFilter: longPress.jitterFilter, navigation: contactMode)
         let events = result.pointer
         if wasPending && !gesture.isPending {
             longPressDiagnostic(events.contains { $0.action == .drag }
@@ -357,12 +353,12 @@ final class PointerOutput {
         emit(events)
         if gesture.hasScheduledClick { scheduleLongPress() }
         else { longPressTimer?.invalidate(); longPressTimer = nil }
-        if !contact { contactSample = nil; temporaryContact = false; temporaryWindow = nil }
+        if !contact { contactSample = nil; fallbackContact = false; fallbackWindow = nil }
         if tabletEnabled && (!sample.inRange || !sample.positionValid || sample.eraser) && inProximity {
             sendProximity(false, at: lastPoint)
         }
     }
-    func release(cancelTemporaryRequest: Bool = true) {
+    func release() {
         longPressTimer?.invalidate(); longPressTimer = nil
         let cancelled = gesture.cancelNavigation()
         emit(cancelled.pointer); emitScroll(cancelled.scroll)
@@ -372,8 +368,7 @@ final class PointerOutput {
         if inProximity { sendProximity(false, at: lastPoint) }
         currentSample = nil; contactSample = nil
         clicks.reset()
-        temporaryContact = false; temporaryWindow = nil
-        if cancelTemporaryRequest { temporaryScroll.cancel() }
+        fallbackContact = false; fallbackWindow = nil
     }
     private func emitScroll(_ events: [PenScrollEvent]) {
         for event in events {
@@ -386,15 +381,20 @@ final class PointerOutput {
             }
         }
     }
+    private func validFallbackWindow(at point: CGPoint) -> Bool {
+        guard let expected = fallbackWindow, let current = window(at: point) else { return false }
+        return current.id == expected.id && current.app.processIdentifier == expected.app.processIdentifier
+            && current.layer == 0 && current.bounds == expected.bounds
+    }
     @discardableResult private func sendScroll(_ planned: PenScrollEvent) -> Bool {
-        if temporaryContact {
+        if fallbackContact {
             let now = ProcessInfo.processInfo.systemUptime
             if planned.phase != .changed || now >= nextWindowValidation {
-                guard let expected = temporaryWindow, let current = window(at: planned.anchor),
+                guard let expected = fallbackWindow, let current = window(at: planned.anchor),
                       current.id == expected.id, current.app.processIdentifier == expected.app.processIdentifier,
                       current.layer == 0, current.bounds == expected.bounds else {
                     postedScrollAnchor = nil
-                    longPressDiagnostic("临时滚动已取消：目标窗口改变或被遮挡")
+                    longPressDiagnostic("未知区域滚动已取消：目标窗口改变或被遮挡")
                     return false
                 }
                 nextWindowValidation = now + 0.05
@@ -403,8 +403,6 @@ final class PointerOutput {
         guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
                                  wheel1: planned.vertical, wheel2: planned.horizontal, wheel3: 0) else { return false }
         event.location = planned.anchor
-        // Option requests this gesture; it must not become an app's Option-scroll command.
-        if temporaryContact { event.flags = [] }
         let ending = planned.phase == .ended || planned.phase == .cancelled
         event.setIntegerValueField(.eventSourceUserData, value: bridgeEventTag)
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)

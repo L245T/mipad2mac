@@ -32,7 +32,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let menuUpdateNotice = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let menuControl = NSMenuItem(title: "启用鼠标控制", action: nil, keyEquivalent: "")
     let menuNavigation = NSMenuItem(title: "笔输入模式", action: nil, keyEquivalent: "")
-    let menuTemporaryScroll = NSMenuItem(title: "下一次拖动滚动", action: nil, keyEquivalent: "")
     let menuTablet = NSMenuItem(title: "压力与倾斜输出", action: nil, keyEquivalent: "")
     let menuScreens = NSMenuItem(title: "目标显示器", action: nil, keyEquivalent: "")
     let rateTestLabel = NSTextField(wrappingLabelWithString: "测试会记录 15 秒实际输入；请持续用笔画圈。无需启用鼠标控制。")
@@ -173,8 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menuTablet.target = self; menuTablet.action = #selector(menuToggleTablet); menu.addItem(menuTablet)
         menuTablet.state = output.tabletEnabled ? .on : .off
         menu.addItem(menuNavigation)
-        menuTemporaryScroll.target = self; menuTemporaryScroll.action = #selector(menuArmTemporaryScroll)
-        menu.addItem(menuTemporaryScroll)
         refreshNavigationMenu()
         menu.addItem(menuScreens); menu.addItem(.separator())
         for (title, action, key) in [("打开控制窗口", #selector(showWindow), ""), ("设置…", #selector(showSettings), ""), ("权限检查…", #selector(showPermissions), ""), ("关于 MiPad2Mac", #selector(showAbout), ""), ("检查更新…", #selector(checkUpdates), ""), ("退出 MiPad2Mac", #selector(quit), "q")] {
@@ -195,8 +192,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menuControl.title = enabled ? "暂停鼠标控制" : (automaticControl.requested ? "取消软件控制" : "启用鼠标控制")
         menuControl.isEnabled = true
         menuTablet.state = output.tabletEnabled ? .on : .off
-        menuTemporaryScroll.title = output.temporaryScrollArmed ? "取消临时滚动" : "下一次拖动滚动"
-        menuTemporaryScroll.isEnabled = enabled
         refreshNavigationMenu()
         let screens = NSMenu(); screens.autoenablesItems = false
         for (index, _) in displays.enumerated() {
@@ -225,7 +220,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard PenApplicationMode.allCases.indices.contains(sender.tag) else { return }
         output.changeNavigation(PenApplicationMode.allCases[sender.tag]); refreshNavigationMenu(); refreshStats()
     }
-    @objc func menuArmTemporaryScroll() { output.toggleTemporaryScroll(); refreshStats() }
     @objc func menuSelectScreen(_ sender: NSMenuItem) {
         guard sender.tag > 0, sender.tag < screenPicker.numberOfItems else { return }
         selectTargetDisplay(sender.tag)

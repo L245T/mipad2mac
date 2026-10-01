@@ -46,7 +46,7 @@ struct PenApplicationPreferencesTests {
         }
     }
     @Test func windowChromeAndControlsNeverBecomePageScroll() {
-        for roles in [["AXWindow"], ["AXStaticText","AXToolbar","AXWindow"],
+        for roles in [["AXStaticText","AXToolbar","AXWindow"],
                       ["AXScrollBar","AXScrollArea","AXWindow"], ["AXSlider","AXScrollArea","AXWindow"],
                       ["AXButton","AXToolbar","AXWebArea","AXWindow"],
                       ["AXTextField","AXWebArea","AXWindow"], ["AXTextArea","AXScrollArea","AXWindow"],
@@ -57,4 +57,15 @@ struct PenApplicationPreferencesTests {
         #expect(PenHitRegion.classify(roles: ["AXGroup","AXScrollArea","AXWindow"]) == .content)
         #expect(PenHitRegion.classify(roles: ["AXUnknown"]) == .unknown)
     }
+    @Test func unknownWindowContentIsDistinctFromKnownControls() {
+        for roles in [["AXWindow"], ["AXUnknown", "AXWindow"], ["AXGroup", "AXWindow"], []] {
+            #expect(PenHitRegion.classify(roles: roles) == .unknown)
+        }
+        let bounds = CGRect(x: -1000, y: -500, width: 800, height: 600)
+        #expect(!UnknownBrowseArea.contains(CGPoint(x: -600, y: -490), in: bounds))
+        #expect(UnknownBrowseArea.contains(CGPoint(x: -600, y: -468), in: bounds))
+        #expect(!UnknownBrowseArea.contains(CGPoint(x: 0, y: 0), in: bounds))
+        #expect(!UnknownBrowseArea.contains(.zero, in: .zero))
+    }
+
 }

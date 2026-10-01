@@ -24,17 +24,18 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
     private var steps: [(Double, () -> Void)] = []
     private var checks: [String] = []
     private var testModifiers: CGEventFlags = []
-    private var temporaryDownBefore = 0
-    private var temporaryScrollBefore = 0
-    private var temporaryRightBefore = 0
-    private var temporaryFlagsBefore = 0
+    private var fallbackDownBefore = 0
+    private var fallbackScrollBefore = 0
+    private var fallbackRightBefore = 0
     private var diagnosticMessages: [String] = []
-    private var temporaryFrame = NSRect.zero
+    private var fallbackFrame = NSRect.zero
+    private var hitUnavailable = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         originalCursor = CGEvent(source: nil)?.location ?? .zero
         defaults = UserDefaults(suiteName: suite)!
         output = PointerOutput(defaults: defaults, observeApplications: false, diagnosticOwnWindow: true,
+                               diagnosticHitUnavailable: { [weak self] in self?.hitUnavailable ?? false },
                                modifierState: { [weak self] in self?.testModifiers ?? [] })
         output.longPress.enabled = false
         output.tabletEnabled = true
@@ -47,7 +48,11 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         textView.font = .monospacedSystemFont(ofSize: 16, weight: .regular)
         textView.isEditable = false; textView.isSelectable = true
         view.addSubview(textView)
-        window.center(); window.makeKeyAndOrderFront(nil)
+        // Whole-desktop titlebar checks use the primary screen; do not center on the pen's secondary display.
+        let primary = NSScreen.screens.first!.visibleFrame
+        window.setFrameOrigin(NSPoint(x: primary.midX - window.frame.width / 2,
+                                      y: primary.midY - window.frame.height / 2))
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         let frame = window.convertToScreen(view.bounds)
         let top = NSScreen.screens.first!.frame.maxY
@@ -261,76 +266,111 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
             self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
             self.output.longPress.enabled = true
             self.view.setAccessibilityRole(.unknown)
-            self.temporaryDownBefore = self.output.downCount
-            self.temporaryScrollBefore = self.view.bridgeScrolls
-            self.temporaryRightBefore = self.view.receivedRightClicks
-            self.temporaryFlagsBefore = self.view.receivedScrollFlags.count
-            self.testModifiers = .maskAlternate
+            self.fallbackDownBefore = self.output.downCount
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.fallbackRightBefore = self.view.receivedRightClicks
+            self.testModifiers = []
             self.pen()
         }
-        append(after: 0.04) {
-            self.testModifiers = [] // Releasing Option during contact must not turn scrolling into selection.
-            self.pen(0.5, 0.6)
-        }
+        append(after: 0.04) { self.pen(0.5, 0.6) }
         append(after: 0.08) { self.pen(0.5, 0.7); self.pen(down: false) }
         append {
-            self.check(self.view.bridgeScrolls > self.temporaryScrollBefore, "Option临时滚动实际到达未知语义的窗口区域")
-            self.check(self.output.downCount == self.temporaryDownBefore, "临时滚动没有左键提交")
-            self.check(self.view.receivedRightClicks == self.temporaryRightBefore, "临时滚动没有长按右键")
-            self.check(self.view.receivedScrollFlags.dropFirst(self.temporaryFlagsBefore).allSatisfy { $0 & CGEventFlags.maskAlternate.rawValue == 0 }, "Option请求标记不传入目标滚动事件")
-            self.output.release(); self.pen(); self.pen(down: false)
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore, "未知区域不需按钮或修饰键就能滚动")
+            self.check(self.output.downCount == self.fallbackDownBefore && self.view.receivedRightClicks == self.fallbackRightBefore, "未知区域滚动没有左键选择或右键")
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
         }
         append {
-            self.check(self.output.downCount == self.temporaryDownBefore + 1, "抬笔后普通接触恢复单击")
-            self.output.applicationProfiles.set(.pointer, for: id, name: "本地事件验收")
-            self.temporaryDownBefore = self.output.downCount
-            self.output.toggleTemporaryScroll(); self.pen()
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore, "抬笔后下一笔继续滚动，不是一次性动作")
+            self.output.release(); self.pen(); self.pen(down: false)
+        }
+        append(after: cadence) {
+            self.check(self.output.downCount == self.fallbackDownBefore + 1, "未知区域轻点仍完整单击")
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.pen(); self.pen(0.55); self.pen(down: false)
+        }
+        append {
+            self.check(self.view.receivedDragClickCounts.last == 2 && self.view.bridgeScrolls == self.fallbackScrollBefore, "未知区域双击按住拖动仍选择，不滚动")
+            self.output.release(); self.pen()
         }
         append(after: 0.8) { self.pen(down: false) }
         append {
-            self.check(self.output.downCount == self.temporaryDownBefore && self.view.receivedRightClicks == self.temporaryRightBefore, "一次性入口静止或轻点不补发点击和右键")
-            self.check(!self.output.temporaryScrollArmed, "一次性入口在接触开始时消耗")
-            self.temporaryScrollBefore = self.view.bridgeScrolls
-            self.output.toggleTemporaryScroll(); self.pen()
+            self.check(self.view.receivedRightClicks == self.fallbackRightBefore + 1, "未知区域静止长按仍触发右键")
+            self.output.release(); self.output.longPress.enabled = false
+            self.fallbackDownBefore = self.output.downCount
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.testModifiers = .maskAlternate; self.pen()
         }
-        append(after: 0.04) { self.pen(0.5, 0.6); self.pen(down: false) }
+        append(after: 0.04) {
+            self.testModifiers = []
+            self.pen(0.5, 0.6); self.pen(down: false)
+        }
         append {
-            self.check(self.view.bridgeScrolls > self.temporaryScrollBefore, "屏幕入口一次性滚动实际到达")
-            self.output.release(); self.temporaryFrame = self.window.frame
-            self.output.toggleTemporaryScroll(); self.pen()
+            self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "Option落笔普通拖动，松开Option不会中途切换")
+            self.output.release(); self.hitUnavailable = true
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.fallbackDownBefore = self.output.downCount
+            self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
+        }
+        append {
+            self.check(self.view.bridgeScrolls > self.fallbackScrollBefore && self.output.downCount == self.fallbackDownBefore, "AX命中完全不可用时按真实窗口连续滚动")
+            self.output.release(); self.output.longPress.enabled = true
+            self.fallbackRightBefore = self.view.receivedRightClicks
+            self.pen()
+        }
+        append(after: 0.8) { self.pen(down: false) }
+        append {
+            self.check(self.view.receivedRightClicks == self.fallbackRightBefore + 1, "AX不可用时长按用原窗口身份核对")
+            self.output.release(); self.output.longPress.enabled = false
+            self.fallbackFrame = self.window.frame
+            self.pen()
         }
         append(after: 0.04) { self.pen(0.5, 0.6) }
         append(after: 0.08) {
-            self.temporaryScrollBefore = self.view.bridgeScrolls
-            self.window.setFrameOrigin(NSPoint(x: self.temporaryFrame.minX + 30, y: self.temporaryFrame.minY))
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.window.setFrameOrigin(NSPoint(x: self.fallbackFrame.minX + 30, y: self.fallbackFrame.minY))
         }
-        // Let WindowServer publish the moved geometry before the next synthetic pen report.
-        append(after: 0.08) {
-            self.pen(0.5, 0.7); self.pen(down: false)
+        append(after: 0.08) { self.pen(0.5, 0.7); self.pen(down: false) }
+        append {
+            self.check(self.view.bridgeScrolls == self.fallbackScrollBefore && self.diagnosticMessages.contains { $0.contains("目标窗口改变或被遮挡") }, "未知窗口移动后取消滚动，不继续投递旧锚点")
+            self.window.setFrame(self.fallbackFrame, display: true)
         }
         append {
-            self.check(self.view.bridgeScrolls == self.temporaryScrollBefore && self.diagnosticMessages.contains { $0.contains("目标窗口改变或被遮挡") }, "窗口移动后取消临时滚动，不继续投递旧锚点")
-            self.window.setFrame(self.temporaryFrame, display: true)
-            self.output.release(); self.output.longPress.enabled = false
-            self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
-            self.temporaryDownBefore = self.output.downCount
-            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.output.release(); self.output.applicationProfiles.set(.browse, for: id, name: "本地事件验收")
+            self.fallbackDownBefore = self.output.downCount
+            self.fallbackScrollBefore = self.view.bridgeScrolls
             self.testModifiers = [.maskAlternate, .maskCommand]
             self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
         }
         append {
-            self.check(self.output.downCount == self.temporaryDownBefore + 1 && self.view.bridgeScrolls == self.temporaryScrollBefore, "Option加其他修饰键保留原普通拖动")
+            self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "修饰键组合保留原普通拖动")
+            self.output.release(); self.testModifiers = []
+            self.originalMapping = self.output.mapping; self.originalFrame = self.window.frame
+            let screen = NSScreen.screens.first!.frame
+            self.output.mapping = Mapping(bounds: CGRect(x: screen.minX, y: 0, width: screen.width, height: screen.height))
+            self.fallbackScrollBefore = self.view.bridgeScrolls
+            self.titlePen()
+        }
+        append(after: 0.04) { self.titlePen(offset: 10) }
+        append(after: 0.04) { self.titlePen(offset: 40) }
+        append(after: 0.08) { self.titlePen(offset: 40, down: false) }
+        append {
+            self.check(abs(self.window.frame.minX - self.originalFrame.minX) > 20 && self.view.bridgeScrolls == self.fallbackScrollBefore, "AX不可用时未知窗口顶部仍可拖动")
+            self.window.setFrame(self.originalFrame, display: true); self.output.mapping = self.originalMapping
             self.output.release(); self.output.applicationProfiles.set(.drawing, for: id, name: "本地事件验收")
-            self.testModifiers = .maskAlternate
-            self.temporaryDownBefore = self.output.downCount
-            self.temporaryScrollBefore = self.view.bridgeScrolls
+            self.output.tabletEnabled = true
+            self.fallbackDownBefore = self.output.downCount
+            self.fallbackScrollBefore = self.view.bridgeScrolls
             self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
         }
         append {
-            self.check(self.output.downCount == self.temporaryDownBefore + 1 && self.view.bridgeScrolls == self.temporaryScrollBefore, "绘画模式优先于Option临时滚动")
-            self.testModifiers = []; self.output.release(); self.output.applicationProfiles.set(.pointer, for: id, name: "本地事件验收")
-            self.output.toggleTemporaryScroll(); self.output.release()
-            self.check(!self.output.temporaryScrollArmed, "暂停或释放清除未使用的临时滚动")
+            self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "AX不可用仍保留绘画模式即时落笔")
+            self.output.release(); self.output.applicationProfiles.set(.pointer, for: id, name: "本地事件验收")
+            self.fallbackDownBefore = self.output.downCount
+            self.pen(); self.pen(0.5, 0.6); self.pen(down: false)
+        }
+        append {
+            self.check(self.output.downCount == self.fallbackDownBefore + 1 && self.view.bridgeScrolls == self.fallbackScrollBefore, "普通指针应用不会因未知区域自动变滚动")
             self.finish()
         }
         runNext()
@@ -354,6 +394,13 @@ final class PointerEventCheck: NSObject, NSApplicationDelegate {
         pen((desktop.x - bounds.minX + horizontalOffset) / (bounds.width - 1), (top - desktop.y - bounds.minY + verticalOffset) / (bounds.height - 1), down: down)
     }
     private func pen(_ x: Double = 0.5, _ y: Double = 0.5, down: Bool = true) {
+        let top = NSScreen.screens.first!.frame.maxY
+        let frame = window.frame
+        let receiver = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+        guard receiver.contains(output.mapping.point(x: x, y: y)) else {
+            blocked = "测试坐标离开本程序接收窗口，停止发送事件"
+            finish(); return
+        }
         output.receive(Sample(x: x, y: y, touching: down, inRange: true,
                               pressure: 4096, tiltX: 30, tiltY: -20, positionValid: true))
     }
