@@ -28,7 +28,12 @@ struct AppPenModesPage: View {
                     Text("绘画").tag(PenApplicationMode.drawing)
                 }
             } footer: {
-                Text("未设置应用例外时，使用此模式。更改后抬笔，再次落笔生效。")
+                HStack(alignment: .top, spacing: 12) {
+                    Text("未设置应用例外时，使用此模式。更改后抬笔，再次落笔生效。")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    ExplanationButton(text: Self.modeHelp, label: "应用输入模式说明")
+                }
             }
             Text("应用例外").font(.headline).padding(.horizontal, 10)
             VStack(alignment: .leading, spacing: 8) {
@@ -72,10 +77,6 @@ struct AppPenModesPage: View {
                 Text("Photoshop兼容规则：" + description)
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 10)
-            }
-            HStack {
-                Spacer()
-                ExplanationButton(text: Self.modeHelp, label: "应用输入模式说明")
             }
             }
         }
